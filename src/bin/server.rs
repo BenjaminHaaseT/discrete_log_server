@@ -18,15 +18,15 @@ use futures::{stream::{Stream, StreamExt}};
 /// # Returns
 /// `Result<(), ServerError>`: `Ok(())` in the success case, otherwise `Err(ServerError)`.
 #[instrument(ret, err)]
-async fn accept_loop(server_addrs: impl ToSocketAddrs + Debug + Clone) -> Result<(), ServerError> {
+async fn accept_loop(server_addrs: impl ToSocketAddrs + Debug + Clone, buf_size: usize) -> Result<(), ServerError> {
     // Bind to the given server address
     let mut listener = TcpListenerStream::new(TcpListener::bind(server_addrs)
         .await
         .map_err(|e| ServerError::Connection(e))?);
     debug!("bound to address successfully");
-    // TODO: set limit for accepting new client connections
+
     // Channel for connecting to main broker task
-    let (broker_send, broker_recv) = channel::<Event>(10);
+    let (broker_send, broker_recv) = channel::<Event>(buf_size);
 
     // Spawn broker task
     let _broker_handle = task::spawn(main_broker(broker_recv));
