@@ -18,6 +18,7 @@ pub enum Event {
 }
 
 /// Data that is read from a client's socket
+#[derive(Debug, PartialEq)]
 pub enum Frame {
     /// A client request to connect to the server
     Connect,
@@ -31,6 +32,8 @@ pub enum Frame {
     /// A client request to disconnect from the server
     Quit,
 }
+
+impl Eq for Frame {}
 
 impl Frame {
     /// Implementation detail of `Frame`, a helper method to aid in serializing into bytes
@@ -147,5 +150,98 @@ pub trait AsBytes: BytesDeser {
     fn as_bytes(&self) -> Vec<u8>;
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
 
+    #[test]
+    fn serialize_frame_should_work() {
+        let frame = Frame::Connect;
+        let tag = frame.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        let frame = Frame::Log { g: 3, h: 2, p: 7 };
+        let tag = frame.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [2, 3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0]);
+
+        let frame = Frame::Log { g: 627, h: 390, p: 941 };
+        let tag = frame.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [2, 115, 2, 0, 0, 0, 0, 0, 0, 134, 1, 0, 0, 0, 0, 0, 0, 173, 3, 0, 0, 0, 0, 0, 0]);
+
+        let frame = Frame::RSA { n: 1794677960, e: 525734818};
+        let tag = frame.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [3, 200, 156, 248, 106, 0, 0, 0, 0, 162, 19, 86, 31, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        let frame = Frame::RSA { n: 38749709, e: 10988423 };
+        let tag = frame.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [3, 13, 70, 79, 2, 0, 0, 0, 0, 135, 171, 167, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        let frame = Frame::Quit;
+        let tag = frame.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn deserialize_frame_should_work() {
+        let frame = Frame::Connect;
+        let tag = frame.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        let deserialized_frame = Frame::deserialize(&tag);
+        println!("{:?}", deserialized_frame);
+        assert_eq!(deserialized_frame, frame);
+
+        let frame = Frame::Log { g: 3, h: 2, p: 7 };
+        let tag = frame.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [2, 3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0]);
+
+        let deserialized_frame = Frame::deserialize(&tag);
+        println!("{:?}", deserialized_frame);
+        assert_eq!(deserialized_frame, frame);
+
+        let frame = Frame::Log { g: 627, h: 390, p: 941 };
+        let tag = frame.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [2, 115, 2, 0, 0, 0, 0, 0, 0, 134, 1, 0, 0, 0, 0, 0, 0, 173, 3, 0, 0, 0, 0, 0, 0]);
+
+        let deserialized_frame = Frame::deserialize(&tag);
+        println!("{:?}", deserialized_frame);
+        assert_eq!(deserialized_frame, frame);
+
+        let frame = Frame::RSA { n: 1794677960, e: 525734818};
+        let tag = frame.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [3, 200, 156, 248, 106, 0, 0, 0, 0, 162, 19, 86, 31, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        let deserialized_frame = Frame::deserialize(&tag);
+        println!("{:?}", deserialized_frame);
+        assert_eq!(deserialized_frame, frame);
+
+        let frame = Frame::RSA { n: 38749709, e: 10988423 };
+        let tag = frame.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [3, 13, 70, 79, 2, 0, 0, 0, 0, 135, 171, 167, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        let deserialized_frame = Frame::deserialize(&tag);
+        println!("{:?}", deserialized_frame);
+        assert_eq!(deserialized_frame, frame);
+
+        let frame = Frame::Quit;
+        let tag = frame.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        let deserialized_frame = Frame::deserialize(&tag);
+        println!("{:?}", deserialized_frame);
+        assert_eq!(deserialized_frame, frame);
+    }
+}
 
