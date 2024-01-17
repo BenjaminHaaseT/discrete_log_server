@@ -1,11 +1,18 @@
 use std::sync::Arc;
+use tokio::io::AsyncReadExt;
 use tokio::net::{TcpStream, TcpSocket};
+use tokio::net::tcp::OwnedWriteHalf;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
+
+pub mod prelude {
+    pub use super::*;
+}
 
 /// An event triggered by a connecting client.
 pub enum Event {
     /// A new client connecting to the server
-    NewClient { peer_id: Uuid, socket: Arc<TcpStream> },
+    NewClient { peer_id: Uuid, socket: OwnedWriteHalf, token: CancellationToken },
 
     /// Variant to represent a client request to solve the discrete logarithm
     Log { peer_id: Uuid, g: u64, h: u64, p: u64, },
@@ -48,6 +55,12 @@ impl Frame {
         for i in 0..8 {
             *val ^= (tag[i + idx] as u64) << (i * 8);
         }
+    }
+
+    pub async fn from_reader<R: AsyncReadExt + Unpin>(reader: &mut R) -> Result<Self, std::io::Error> {
+        let mut buf = [0u8; 25];
+        reader.read_exact(&mut buf).await?;
+        Ok(Frame::deserialize(&buf))
     }
 }
 
