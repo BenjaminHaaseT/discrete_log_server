@@ -4,10 +4,11 @@ use std::sync::{Arc};
 use tokio::net::{ToSocketAddrs, TcpStream, TcpListener};
 use tokio_stream::wrappers::TcpListenerStream;
 use tokio::sync::{mpsc::{self, channel, Receiver, Sender}};
-use tokio::task;
-use tokio_util::sync::CancellationToken;
+use tokio::task::{self, JoinError, JoinHandle};
+use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{instrument, error, debug, info, warn};
 use futures::{stream::{Stream, StreamExt}};
+use tokio::net::tcp::OwnedWriteHalf;
 use uuid::Uuid;
 
 use discrete_log_server::prelude::*;
@@ -32,7 +33,7 @@ async fn accept_loop(server_addrs: impl ToSocketAddrs + Debug + Clone, buf_size:
     let (broker_send, broker_recv) = channel::<Event>(buf_size);
 
     // Spawn broker task
-    let _broker_handle = task::spawn(main_broker(broker_recv));
+    let mut broker_handle = task::spawn(main_broker(broker_recv));
     debug!("broker task spawned");
 
     // Accept loop
@@ -47,8 +48,10 @@ async fn accept_loop(server_addrs: impl ToSocketAddrs + Debug + Clone, buf_size:
         }
     }
 
-    //TODO: graceful shutdown routine
-
+    // TODO: graceful shutdown routine
+    broker_handle
+        .await
+        .map_err(|e| ServerError::Task(e))??;
     Ok(())
 }
 
@@ -71,12 +74,14 @@ async fn client_read_task(socket: TcpStream, broker_send: Sender<Event>) -> Resu
     let peer_id = Uuid::new_v4();
     // Cancellation token for graceful shutdown
     let token = CancellationToken::new();
+    let shutdown_token = token.child_token();
+    let _token = token.drop_guard();
 
-    // Create new client event to inform broker
+    // Create new client event to inform broker a new client has connected
     let event = Event::NewClient {
         peer_id,
         socket: client_writer,
-        token
+        token: shutdown_token,
     };
 
     // Send the event to the broker
@@ -84,17 +89,71 @@ async fn client_read_task(socket: TcpStream, broker_send: Sender<Event>) -> Resu
         .await
         .map_err(|_e| ServerError::ChannelSend(format!("Client {} unable to send event to broker", peer_id)))?;
 
-    // loop {
-    //     let frame = match
-    // }
+    loop {
+        let frame = Frame::from_reader(&mut client_reader)
+            .await
+            .map_err(|e| ServerError::Read(e))?;
 
+        // Match on frame
+        let event = match frame {
+            Frame::Log { g, h, p } => Event::Log { peer_id, g, h, p },
+            Frame::RSA { n, e} => Event::RSA { peer_id, n, e },
+            Frame::Quit => {
+                // The client is quitting the application, so break
+                broker_send.send(Event::Quit { peer_id })
+                    .await
+                    .map_err(|_e| ServerError::ChannelSend("Client {} unable to send event to main broker".to_string()))?;
+                info!(peer_id = ?peer_id, "Client {} read task is exiting loop", peer_id);
+                break;
+            },
+            f => {
+                // Create error for logging, this case should not happen
+                let error = ServerError::IllegalFrame(peer_id, f);
+                error!(error = ?error, "Illegal frame received from client {}", peer_id);
+                return Err(error);
+            }
+        };
+
+        // Send the event to the broker
+        broker_send.send(event)
+            .await
+            .map_err(|_e| ServerError::ChannelSend("Client {} unable to send event to main broker".to_string()))?;
+    }
+
+    // _token will be dropped after task finishes, sending a shutdown signal to the write task
+    Ok(())
+}
+
+/// The task that will write responses back to the client.
+///
+/// Takes a write half of socket, a receiving half of a channel for receiving responses from the broker and a token
+/// for listening to shutdown signals sent from the associated writer task. This function will listen fo incoming
+/// responses from the broker and write them back to the client's socket.
+///
+/// # Parameters
+/// `peer_id`, The `Uuid` of the client
+/// `client_writer`, The write half of the client's socket
+/// `broker_recv`, The receiving half of the channel connecting this task with the main broker
+/// `token`, The `CancellationToken` that informs this task to shutdown
+///
+/// # Returns
+/// `Result<(), ServerError>`, In the success case a `Ok(())` will be returned, otherwise `Err(ServerError)`.
+#[instrument(ret, err, skip(client_writer, broker_recv, token))]
+async fn client_write_task(peer_id: Uuid, client_writer: OwnedWriteHalf, broker_recv: Receiver<Response>, token: CancellationToken) -> Result<(), ServerError> {
+    todo!()
+}
+
+async fn main_broker(events: Receiver<Event>) -> Result<(), ServerError> {
     todo!()
 }
 
 #[derive(Debug)]
 pub enum ServerError<> {
     Connection(std::io::Error),
-    ChannelSend(String)
+    ChannelSend(String),
+    IllegalFrame(Uuid, Frame),
+    Read(std::io::Error),
+    Task(JoinError),
 }
 
 impl Display for ServerError {
@@ -105,7 +164,7 @@ impl Display for ServerError {
     }
 }
 
-impl<T> std::error::Error for ServerError {}
+impl std::error::Error for ServerError {}
 
 fn main() {}
 
