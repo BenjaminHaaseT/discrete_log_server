@@ -6,7 +6,6 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 pub mod algo;
-mod algo;
 
 use algo::prelude::*;
 
