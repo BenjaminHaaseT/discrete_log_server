@@ -57,25 +57,40 @@ impl PollardsLog {
         }
     }
 
-    fn solve(&self) -> u64 {
+    fn solve(&self) -> Option<u64> {
         assert!(self.xi == self.yi);
         // Compute the exponents after combining like terms
         let u = if self.ai >= self.gi {
             (self.ai - self.gi) % (self.p - 1)
         } else {
-            ((self.ai - self.gi) + (self.p - 1)) % (self.p - 1)
+            (self.ai + (self.p - 1) - self.gi) % (self.p - 1)
         };
         let v = if self.di >= self.bi {
             (self.di - self.bi) % (self.p - 1)
         } else {
-            ((self.di - self.bi) + (self.p - 1)) % (self.p - 1)
+            (self.di + (self.p - 1) - self.bi) % (self.p - 1)
         };
         // Compute gcd of v and p - 1
         let d = gcd(v, self.p - 1);
         let (s, t) = gcd_weights(v, self.p - 1);
+
         // Find correct combination of weights that sum to d
         let v_inv = gcd_mul_inverse(self.p - 1, v, d, s, t);
-        todo!()
+        assert_eq!((v * v_inv) % (self.p - 1), d);
+
+        // Finally solve
+        let r = ((u * v_inv) % (self.p - 1)) / d;
+        let mut found = None;
+        for k in 0..d {
+            let e = ((self.p - 1) / d) * k + r;
+            let res = fast_power(self.g, e, self.p);
+            if res == self.h {
+                found = Some(e);
+                break;
+            }
+        }
+
+        found
     }
 }
 
@@ -122,6 +137,20 @@ pub mod utils {
         b
     }
 
+    pub fn fast_power(mut g: u64, mut e: u64, n: u64) -> u64 {
+        let mut r = 1;
+        while e > 0 {
+            if e % 2 == 1 {
+                r *= g;
+                r %= n;
+            }
+            g *= g;
+            g %= n;
+            e /= 2;
+        }
+        r
+    }
+
     pub fn gcd_weights(mut a: u64, mut b: u64) -> (u64, u64) {
         let mut p_vec = vec![1];
         let mut q_vec = vec![0, 1];
@@ -147,15 +176,27 @@ pub mod utils {
             while m < t {
                 m += m;
             }
+            // println!("gcd_mul_inverse, branch1");
+            let v_inv = (m - t) % m;
+            assert_eq!((v * v_inv) % m, d);
             (m - t) % m
         } else if m * t > v * s && m * t - v * s == d {
             while m < s {
                 m += m;
             }
+            // println!("gcd_mul_inverse, branch2");
+            let v_inv = (m - s) % m;
+            assert_eq!((v * v_inv) % m, d);
             (m - s) % m
         } else if v * t > m * s && t * v - m * s == d {
-            v % m
+            // println!("gcd_mul_inverse, branch3");
+            let v_inv = t % m;
+            assert_eq!((v * v_inv) % m, d);
+            t % m
         } else {
+            // println!("gcd_mul_inverse, branch4");
+            let v_inv = s % m;
+            assert_eq!((v * v_inv) % m, d);
             s % m
         }
     }
@@ -296,6 +337,55 @@ mod test {
         println!("b * b_inv mod a = {}", (b * b_inv) % a);
         assert_eq!((b * b_inv) % a, d);
     }
+
+    #[test]
+    fn pollards_log_solve_test() {
+        let (p, g, h) = (5011, 2, 2495);
+        println!("p: {}, g: {}, h: {}", p, g, h);
+        let mut pollards = PollardsLog::new(p, g, h);
+        for item in &mut pollards {
+            println!("{:?}", item);
+        }
+        let log = pollards.solve();
+        println!("{:?}", log);
+        assert!(log.is_some());
+        let log = log.unwrap();
+        let res = fast_power(g, log, p);
+        println!("res: {}", res);
+        assert_eq!(res, h);
+        println!();
+
+        let (p, g, h) = (17959, 17, 14226);
+        println!("p: {}, g: {}, h: {}", p, g, h);
+        let mut pollards = PollardsLog::new(p, g, h);
+        for item in &mut pollards {
+            println!("{:?}", item);
+        }
+        let log = pollards.solve();
+        println!("{:?}", log);
+        assert!(log.is_some());
+        let log = log.unwrap();
+        let res = fast_power(g, log, p);
+        println!("res: {}", res);
+        assert_eq!(res, h);
+        println!();
+
+        let (p, g, h) = (15239131, 29, 5953042);
+        println!("p: {}, g: {}, h: {}", p, g, h);
+        let mut pollards = PollardsLog::new(p, g, h);
+        for item in &mut pollards {
+            println!("{:?}", item);
+        }
+        let log = pollards.solve();
+        println!("{:?}", log);
+        assert!(log.is_some());
+        let log = log.unwrap();
+        let res = fast_power(g, log, p);
+        println!("res: {}", res);
+        assert_eq!(res, h);
+        println!();
+    }
+
 }
 
 
