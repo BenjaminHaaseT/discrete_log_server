@@ -73,6 +73,9 @@ impl PollardsLog {
         // Compute gcd of v and p - 1
         let d = gcd(v, self.p - 1);
         let (s, t) = gcd_weights(v, self.p - 1);
+        // Find correct combination of weights that sum to d
+        let v_inv = gcd_mul_inverse(self.p - 1, v, d, s, t);
+        todo!()
     }
 }
 
@@ -137,6 +140,25 @@ pub mod utils {
         }
         (p_vec[p_vec.len() - 2], q_vec[q_vec.len() - 2])
     }
+
+    pub fn gcd_mul_inverse(m: u64, v: u64, d: u64, s: u64, t: u64) -> u64 {
+        let mut m = m;
+        if m * s > v * t && m * s - v * t == d {
+            while m < t {
+                m += m;
+            }
+            (m - t) % m
+        } else if m * t > v * s && m * t - v * s == d {
+            while m < s {
+                m += m;
+            }
+            (m - s) % m
+        } else if v * t > m * s && t * v - m * s == d {
+            v % m
+        } else {
+            s % m
+        }
+    }
 }
 
 #[cfg(test)]
@@ -150,6 +172,129 @@ mod test {
             println!("{:?}", item);
         }
         println!("{:?}", pollard);
+    }
+
+    #[test]
+    fn gcd_weights_test() {
+        let (a, b) = (100, 80);
+        let d = gcd(a, b);
+        let (u, v) = gcd_weights(a, b);
+        println!("a: {}, b: {}", a, b);
+        println!("u: {}, v: {}", u, v);
+        if a * u > b * v && a * u - b * v == d {
+            println!("a * u - b * v = {}", d);
+        } else if a * v > b * u && a * v - b * u == d {
+            println!("a * v - b * u = {}", d);
+        } else if b * v > a * u && b * v - a * u == d {
+            println!("b * v - a * u = {}", d);
+        } else {
+            assert!(b * u > a * v);
+            assert_eq!(b * u - a * v, d);
+            println!("b * u - a * v = {}", d);
+        }
+
+        println!();
+
+        let (a, b) = (9409612, 666);
+        let d = gcd(a, b);
+        let (u, v) = gcd_weights(a, b);
+        println!("a: {}, b: {}", a, b);
+        println!("u: {}, v: {}", u, v);
+        if a * u > b * v && a * u - b * v == d {
+            println!("a * u - b * v = {}", d);
+        } else if a * v > b * u && a * v - b * u == d {
+            println!("a * v - b * u = {}", d);
+        } else if b * v > a * u && b * v - a * u == d {
+            println!("b * v - a * u = {}", d);
+        } else {
+            assert!(b * u > a * v);
+            assert_eq!(b * u - a * v, d);
+            println!("b * u - a * v = {}", d);
+        }
+
+        println!();
+
+        let (a, b) = (2200, 124);
+        let d = gcd(a, b);
+        let (u, v) = gcd_weights(a, b);
+        println!("a: {}, b: {}", a, b);
+        println!("u: {}, v: {}", u, v);
+        if a * u > b * v && a * u - b * v == d {
+            println!("a * u - b * v = {}", d);
+        } else if a * v > b * u && a * v - b * u == d {
+            println!("a * v - b * u = {}", d);
+        } else if b * v > a * u && b * v - a * u == d {
+            println!("b * v - a * u = {}", d);
+        } else {
+            assert!(b * u > a * v);
+            assert_eq!(b * u - a * v, d);
+            println!("b * u - a * v = {}", d);
+        }
+
+        println!();
+
+        let (a, b) = (1782886218, 34478);
+        let d = gcd(a, b);
+        let (u, v) = gcd_weights(a, b);
+        println!("a: {}, b: {}", a, b);
+        println!("u: {}, v: {}", u, v);
+        if a * u > b * v && a * u - b * v == d {
+            println!("a * u - b * v = {}", d);
+        } else if a * v > b * u && a * v - b * u == d {
+            println!("a * v - b * u = {}", d);
+        } else if b * v > a * u && b * v - a * u == d {
+            println!("b * v - a * u = {}", d);
+        } else {
+            assert!(b * u > a * v);
+            assert_eq!(b * u - a * v, d);
+            println!("b * u - a * v = {}", d);
+        }
+    }
+
+    #[test]
+    fn gcd_mul_inverse_test() {
+        let (a, b) = (100, 80);
+        let d = gcd(a, b);
+        let (u, v) = gcd_weights(a, b);
+        println!("a: {}, b: {}", a, b);
+        println!("u: {}, v: {}", u, v);
+        let b_inv = gcd_mul_inverse(a, b, d, u, v);
+        println!("b_inv = {}", b_inv);
+        println!("b * b_inv mod a = {}", (b * b_inv) % a);
+        assert_eq!((b * b_inv) % a, d);
+        println!();
+
+        let (a, b) = (9409612, 666);
+        let d = gcd(a, b);
+        let (u, v) = gcd_weights(a, b);
+        println!("a: {}, b: {}", a, b);
+        println!("u: {}, v: {}", u, v);
+        let b_inv = gcd_mul_inverse(a, b, d, u, v);
+        println!("b_inv = {}", b_inv);
+        println!("b * b_inv mod a = {}", (b * b_inv) % a);
+        assert_eq!((b * b_inv) % a, d);
+        println!();
+
+        let (a, b) = (2200, 124);
+        let d = gcd(a, b);
+        let (u, v) = gcd_weights(a, b);
+        println!("a: {}, b: {}", a, b);
+        println!("u: {}, v: {}", u, v);
+        let b_inv = gcd_mul_inverse(a, b, d, u, v);
+        println!("b_inv = {}", b_inv);
+        println!("b * b_inv mod a = {}", (b * b_inv) % a);
+        assert_eq!((b * b_inv) % a, d);
+        println!();
+
+        let (a, b) = (1782886218, 34478);
+        let d = gcd(a, b);
+        let (u, v) = gcd_weights(a, b);
+        println!("a: {}, b: {}", a, b);
+        println!("u: {}, v: {}", u, v);
+        let b_inv = gcd_mul_inverse(a, b, d, u, v);
+        println!("b_inv = {}", b_inv);
+        println!("b * b_inv mod a = {}", (b * b_inv) % a);
+        assert_eq!((b * b_inv) % a, d);
     }
 }
 
