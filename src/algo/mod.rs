@@ -1,4 +1,5 @@
 use std::iter::Iterator;
+use rand::prelude::*;
 
 pub mod prelude {
     pub use super::*;
@@ -92,6 +93,10 @@ impl PollardsLog {
 
         found
     }
+
+    pub fn steps_to_sqrt_mod_ratio(&self) -> f64 {
+        (self.i as f64) / (f64::sqrt(self.p as f64))
+    }
 }
 
 impl Iterator for PollardsLog {
@@ -122,6 +127,63 @@ impl Iterator for PollardsLog {
             gi: self.gi,
             di: self.di
         })
+    }
+}
+
+#[derive(Debug)]
+pub struct PollardsRSAFactItem {
+    i: usize,
+    xi: u64,
+    yi: u64,
+    g: u64,
+    n: u64
+}
+
+#[derive(Debug)]
+pub struct PollardsRSAFact {
+    n: u64,
+    i: usize,
+    xi: u64,
+    yi: u64,
+    factor: Option<u64>,
+    finished: bool,
+}
+
+impl PollardsRSAFact {
+    pub fn new(n: u64) -> Self {
+        assert!((n - 1).checked_mul((n - 1)).is_some(), "modulus too large, overflow may occur");
+        Self { n, i: 0, xi: 1, yi: 1,  factor: None, finished: false }
+    }
+
+    fn mix(&self, x: u64) -> u64 {
+        (((x * x) % self.n) + 1) % self.n
+    }
+
+    pub fn factor(&mut self) -> Option<u64> {
+        self.factor.take()
+    }
+
+    pub fn steps_to_sqrt_mod_ratio(&self) -> f64 {
+        (self.i as f64) / f64::sqrt(self.n as f64)
+    }
+}
+
+impl Iterator for PollardsRSAFact {
+    type Item = PollardsRSAFactItem;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
+        self.i += 1;
+        self.xi = self.mix(self.xi);
+        self.yi = self.mix(self.yi);
+        self.yi = self.mix(self.yi);
+        let g = gcd(self.xi.abs_diff(self.yi), self.n);
+        if g != 1 && self.n % g == 0 {
+            self.finished = true;
+            self.factor = Some(g);
+        }
+        Some(PollardsRSAFactItem { i: self.i, xi: self.xi, yi: self.yi, g, n: self.n })
     }
 }
 
@@ -199,6 +261,31 @@ pub mod utils {
             assert_eq!((v * v_inv) % m, d);
             s % m
         }
+    }
+
+    pub fn miller_rabin(n: u64, a: u64) -> bool {
+        let d = gcd(a, n);
+        if n % 2 == 0 || (1 < d && d < n) {
+            return true;
+        }
+        let mut q = n - 1;
+        let mut k = 0;
+        while q % 2 == 0 {
+            q /= 2;
+            k += 1;
+        }
+        let mut a = fast_power(a, q, n);
+        if a % n == 1 {
+            return false;
+        }
+        for i in 0..k {
+            if a % n == n - 1 {
+                return false;
+            }
+            a *= a;
+            a %= n;
+        }
+        true
     }
 }
 
@@ -293,6 +380,46 @@ mod test {
     }
 
     #[test]
+    fn miller_rabin_test() {
+        let n = 561;
+        let a = 2;
+        let res = miller_rabin(n, a);
+        println!("res: {}", res);
+
+        let n = 172947529;
+        // let a = 2;
+        // let res = miller_rabin(n, a);
+        // println!("res: {}", res);
+
+        let a = 17;
+        let res = miller_rabin(n, a);
+        println!("res: {}", res);
+
+        let a = 23;
+        let res = miller_rabin(n, a);
+        println!("res: {}", res);
+
+        let mut rng = rand::thread_rng();
+        let mut k = 0;
+        let n = 15239131;
+        let mut prime_flag = true;
+        while k < 20 {
+            let a = rng.gen_range(2..n);
+            if a == 1 {
+                continue;
+            }
+            if miller_rabin(n, a) {
+                prime_flag = false;
+                break;
+            }
+            k += 1;
+        }
+
+        assert!(prime_flag);
+        println!("{} is prime with probability: {:2.20}", n, 1.0 - f64::powi(0.25, k));
+    }
+
+    #[test]
     fn gcd_mul_inverse_test() {
         let (a, b) = (100, 80);
         let d = gcd(a, b);
@@ -352,6 +479,7 @@ mod test {
         let log = log.unwrap();
         let res = fast_power(g, log, p);
         println!("res: {}", res);
+        println!("steps to sqrt mod ratio: {:10.10}", pollards.steps_to_sqrt_mod_ratio());
         assert_eq!(res, h);
         println!();
 
@@ -367,6 +495,7 @@ mod test {
         let log = log.unwrap();
         let res = fast_power(g, log, p);
         println!("res: {}", res);
+        println!("steps to sqrt mod ratio: {:10.10}", pollards.steps_to_sqrt_mod_ratio());
         assert_eq!(res, h);
         println!();
 
@@ -382,8 +511,67 @@ mod test {
         let log = log.unwrap();
         let res = fast_power(g, log, p);
         println!("res: {}", res);
+        println!("steps to sqrt mod ratio: {:10.10}", pollards.steps_to_sqrt_mod_ratio());
         assert_eq!(res, h);
         println!();
+    }
+
+    #[test]
+    fn test_pollards_rsa_factor() {
+        let mut pollards = PollardsRSAFact::new(1782886219);
+        for item in &mut pollards {
+            println!("{:?}", item);
+        }
+        let factor1 = pollards.factor();
+        println!("{:?}", factor1);
+        assert!(factor1.is_some());
+
+        let factor1 = factor1.unwrap();
+        assert_ne!(factor1, 1);
+        assert_eq!(pollards.n % factor1, 0);
+
+        let factor2 = pollards.n / factor1;
+        println!("factor1: {}, factor2: {}", factor1, factor2);
+        println!("factor1 * factor2 = {}", factor1 * factor2);
+        println!("Steps to modulus sqrt ratio: {:10.10}", pollards.steps_to_sqrt_mod_ratio());
+        assert_eq!(factor1 * factor2, pollards.n);
+
+        let mut pollards = PollardsRSAFact::new(9409613);
+        for item in &mut pollards {
+            println!("{:?}", item);
+        }
+        let factor1 = pollards.factor();
+        println!("{:?}", factor1);
+        assert!(factor1.is_some());
+
+        let factor1 = factor1.unwrap();
+        assert_ne!(factor1, 1);
+        assert_eq!(pollards.n % factor1, 0);
+
+        let factor2 = pollards.n / factor1;
+        println!("factor1: {}, factor2: {}", factor1, factor2);
+        println!("factor1 * factor2 = {}", factor1 * factor2);
+        println!("Steps to modulus sqrt ratio: {:10.10}", pollards.steps_to_sqrt_mod_ratio());
+        assert_eq!(factor1 * factor2, pollards.n);
+
+        let mut pollards = PollardsRSAFact::new(2201);
+        for item in &mut pollards {
+            println!("{:?}", item);
+        }
+        let factor1 = pollards.factor();
+        println!("{:?}", factor1);
+        assert!(factor1.is_some());
+
+        let factor1 = factor1.unwrap();
+        assert_ne!(factor1, 1);
+        assert_eq!(pollards.n % factor1, 0);
+
+        let factor2 = pollards.n / factor1;
+        println!("factor1: {}, factor2: {}", factor1, factor2);
+        println!("factor1 * factor2 = {}", factor1 * factor2);
+        println!("Steps to modulus sqrt ratio: {:10.10}", pollards.steps_to_sqrt_mod_ratio());
+
+        assert_eq!(factor1 * factor2, pollards.n);
     }
 
 }

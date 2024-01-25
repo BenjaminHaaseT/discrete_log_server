@@ -138,10 +138,10 @@ async fn client_read_task(socket: TcpStream, broker_send: Sender<Event>) -> Resu
 ///
 /// # Returns
 /// `Result<(), ServerError>`, In the success case a `Ok(())` will be returned, otherwise `Err(ServerError)`.
-#[instrument(ret, err, skip(client_writer, broker_recv, token))]
-async fn client_write_task(peer_id: Uuid, client_writer: OwnedWriteHalf, broker_recv: Receiver<Response>, token: CancellationToken) -> Result<(), ServerError> {
-    todo!()
-}
+// #[instrument(ret, err, skip(client_writer, broker_recv, token))]
+// async fn client_write_task(peer_id: Uuid, client_writer: OwnedWriteHalf, broker_recv: Receiver<Response>, token: CancellationToken) -> Result<(), ServerError> {
+//     todo!()
+// }
 
 async fn main_broker(events: Receiver<Event>) -> Result<(), ServerError> {
     todo!()
