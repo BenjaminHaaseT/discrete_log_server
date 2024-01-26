@@ -97,7 +97,8 @@ async fn client_read_task(socket: TcpStream, broker_send: Sender<Event>) -> Resu
         // Match on frame
         let event = match frame {
             Frame::Log { g, h, p } => Event::Log { peer_id, g, h, p },
-            Frame::RSA { n, e} => Event::RSA { peer_id, n, e },
+            Frame::RSA { n, e} => Event::RSA { peer_id, n },
+            Frame::Prime { p} => Event::Prime { peer_id, p },
             Frame::Quit => {
                 // The client is quitting the application, so break
                 broker_send.send(Event::Quit { peer_id })
