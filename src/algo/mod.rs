@@ -151,7 +151,7 @@ pub struct PollardsRSAFact {
 
 impl PollardsRSAFact {
     pub fn new(n: u64) -> Self {
-        assert!((n - 1).checked_mul((n - 1)).is_some(), "modulus too large, overflow may occur");
+        assert!((n - 1).checked_mul(n - 1).is_some(), "modulus too large, overflow may occur");
         Self { n, i: 0, xi: 1, yi: 1,  factor: None, finished: false }
     }
 

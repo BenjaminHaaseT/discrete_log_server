@@ -24,6 +24,9 @@ pub enum Event {
     /// Variant to represent a client request to find the RSA private key from the given public key
     RSA { peer_id: Uuid, n: u64, e: u64},
 
+    /// Variant to represent a client request to check if a number is prime or not
+    Prime { peer_id: Uuid, p: u64 },
+
     /// Variant to represent a client disconnecting from the server, mainly for logging
     Quit { peer_id: Uuid }
 }
@@ -39,6 +42,9 @@ pub enum Frame {
 
     /// A client request to decrypt the RSA private key from the give public key
     RSA { n: u64, e: u64 },
+
+    /// A client request to check if a number is prime or not
+    Prime { p: u64 },
 
     /// A client request to disconnect from the server
     Quit,
@@ -86,7 +92,11 @@ impl BytesSer for Frame {
                 Frame::serialize_8_bytes(&mut tag, 1, *n);
                 Frame::serialize_8_bytes(&mut tag, 9, *e);
             }
-            Frame::Quit => tag[0] ^= 4
+            Frame::Prime { p } => {
+                tag[0] ^= 4;
+                Frame::serialize_8_bytes(&mut tag, 1, *p);
+            }
+            Frame::Quit => tag[0] ^= 5,
         }
         tag
     }
@@ -112,8 +122,12 @@ impl BytesDeser for Frame {
             Frame::deserialize_8_bytes(&tag, 9, &mut e);
             Frame::RSA { n, e }
         } else if type_byte ^ 4 == 0 {
+            let mut p = 0;
+            Frame::deserialize_8_bytes(tag, 1, &mut p);
+            Frame::Prime { p }
+        } else if type_byte ^ 5 == 0 {
             Frame::Quit
-        } else  {
+        } else {
             panic!("invalid type byte detected when deserializing `Frame`.");
         }
     }
@@ -198,10 +212,15 @@ mod tests {
         println!("{:?}", tag);
         assert_eq!(tag, [3, 13, 70, 79, 2, 0, 0, 0, 0, 135, 171, 167, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
+        let frame = Frame::Prime { p: 15239131 };
+        let tag = frame.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [4, 219, 135, 232, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
         let frame = Frame::Quit;
         let tag = frame.serialize();
         println!("{:?}", tag);
-        assert_eq!(tag, [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(tag, [5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     }
 
     #[test]
@@ -251,10 +270,18 @@ mod tests {
         println!("{:?}", deserialized_frame);
         assert_eq!(deserialized_frame, frame);
 
+        let frame = Frame::Prime { p: 15239131 };
+        let tag = frame.serialize();
+        println!("{:?}", tag);
+
+        let deserialized_frame = Frame::deserialize(&tag);
+        println!("{:?}", deserialized_frame);
+        assert_eq!(frame, deserialized_frame);
+
         let frame = Frame::Quit;
         let tag = frame.serialize();
         println!("{:?}", tag);
-        assert_eq!(tag, [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(tag, [5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
         let deserialized_frame = Frame::deserialize(&tag);
         println!("{:?}", deserialized_frame);
