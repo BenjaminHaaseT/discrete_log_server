@@ -50,7 +50,7 @@ pub enum Response {
     LogItem { item: PollardsLogItem },
 
     /// The result of successfully computing the discrete logarithm
-    SuccessfulLogRes { log: u64, g: u64, h: u64, p: u64 },
+    SuccessfulLog { log: u64, g: u64, h: u64, p: u64 },
 
     /// Informs client that algorithm was unsuccessfully able to determine the discrete log
     UnsuccessfulLog { g: u64, h: u64, p: u64 },
@@ -62,11 +62,128 @@ pub enum Response {
     RSAItem { item: PollardsRSAFactItem },
 
     /// Informs the client that the algorithm successfully factored the RSA key
-    SuccessfulRSARes { p: u64, q: u64 },
+    SuccessfulRSA { p: u64, q: u64 },
 
     /// Informs the client that the algorithm was unsuccessfully able to factor the RSA key
     UnsuccessfulRSA { n: u64 }
 }
+
+impl Response {
+    fn serialize_8_bytes(tag: &mut ResponseSerTag, idx: usize, val: u64) {
+        for i in 0..8 {
+            tag[i + idx] ^= ((val >> (i * 8)) & 0xff) as u8;
+        }
+    }
+
+    fn deserialize_8_bytes(tag: &ResponseSerTag, idx: usize, val: &mut u64) {
+        for i in 0..8 {
+            *val ^= (tag[idx + i] as u64) << (i * 8);
+        }
+    }
+
+    fn serialize_4_bytes(tag: &mut ResponseSerTag, idx: usize, val: u32) {
+        for i in 0..4 {
+            tag[i + idx] ^= ((val >> (i * 8)) & 0xff) as u8;
+        }
+    }
+
+    fn deserialize_4_bytes(tag: &ResponseSerTag, idx: usize, val: &mut u32) {
+        for i in 0..4 {
+            *val ^= (tag[i + idx] as u32) << (i * 8);
+        }
+    }
+}
+
+impl BytesSer for Response {
+    type SerTag = ResponseSerTag;
+
+    fn serialize(&self) -> Self::SerTag {
+        let mut tag = [0u8; 57];
+        match self {
+            Response::ConnectionOk => tag[0] ^= 1,
+            Response::NotPrime {p} => {
+                tag[0] ^= 2;
+                Response::serialize_8_bytes(&mut tag, 1, *p);
+            }
+            Response::Prime {p, prob} => {
+                tag[0] ^= 3;
+                Response::serialize_8_bytes(&mut tag, 1, *p);
+                Response::serialize_4_bytes(&mut tag, 9, (*prob).to_bits())
+            }
+            Response::LogItem { item} => {
+                tag[0] ^= 4;
+                Response::serialize_8_bytes(&mut tag, 1, item.i as u64);
+                Response::serialize_8_bytes(&mut tag, 9, item.xi);
+                Response::serialize_8_bytes(&mut tag, 17, item.ai);
+                Response::serialize_8_bytes(&mut tag, 25, item.bi);
+                Response::serialize_8_bytes(&mut tag, 33, item.yi);
+                Response::serialize_8_bytes(&mut tag, 41, item.gi);
+                Response::serialize_8_bytes(&mut tag, 49, item.di);
+            }
+            Response::SuccessfulLog { log, g, h, p} => {
+                tag[0] ^= 5;
+                Response::serialize_8_bytes(&mut tag, 1, *log);
+                Response::serialize_8_bytes(&mut tag, 9, *g);
+                Response::serialize_8_bytes(&mut tag, 17, *h);
+                Response::serialize_8_bytes(&mut tag, 25, *p);
+            }
+            Response::UnsuccessfulLog { g, h, p} => {
+                tag[0] ^= 6;
+                Response::serialize_8_bytes(&mut tag, 1, *g);
+                Response::serialize_8_bytes(&mut tag, 9, *h);
+                Response::serialize_8_bytes(&mut tag, 17, *p);
+            }
+            Response::RSAItem { item} => {
+                tag[0] ^= 7;
+                Response::serialize_8_bytes(&mut tag, 1, item.i as u64);
+                Response::serialize_8_bytes(&mut tag, 9, item.xi);
+                Response::serialize_8_bytes(&mut tag, 17, item.yi);
+                Response::serialize_8_bytes(&mut tag, 25, item.g);
+                Response::serialize_8_bytes(&mut tag, 33, item.n);
+            }
+            Response::SuccessfulRSA { p, q} => {
+                tag[0] ^= 8;
+                Response::serialize_8_bytes(&mut tag, 1, *p);
+                Response::serialize_8_bytes(&mut tag, 9, *q);
+            }
+            Response::UnsuccessfulRSA {n} => {
+                tag[0] ^= 9;
+                Response::serialize_8_bytes(&mut tag, 1, *n);
+            }
+            _ => panic!("`Response` variant cannot be serialized.")
+        }
+        tag
+    }
+}
+
+impl BytesDeser for Response {
+    type DeserTag = Response;
+    fn deserialize(tag: &Self::SerTag) -> Response {
+        match tag[0] {
+            1 => Response::ConnectionOk,
+            2 => {
+                let mut p = 0;
+                Response::deserialize_8_bytes(tag, 1, &mut p);
+                Response::NotPrime { p }
+            }
+            3 => {
+                let mut p = 0;
+                let mut prob = 0;
+                Response::deserialize_8_bytes(tag, 1, &mut p);
+                Response::deserialize_4_bytes(tag, 9, &mut prob);
+                Response::Prime { p, prob: f32::from_bits(prob) }
+            }
+            _ => todo!()
+        }
+    }
+}
+
+/// The type of serialization tag for a `Response`.
+pub type ResponseSerTag = [u8; 57];
+
+impl SerializationTag for ResponseSerTag {}
+
+impl DeserializationTag for Response {}
 
 /// Data that is read from a client's socket
 #[derive(Debug, PartialEq)]
@@ -178,7 +295,6 @@ pub type FrameSerTag = [u8; 25];
 impl SerializationTag for FrameSerTag {}
 
 impl DeserializationTag for Frame {}
-
 
 /// An interface for any type that can be serialized into bytes.
 pub trait BytesSer {

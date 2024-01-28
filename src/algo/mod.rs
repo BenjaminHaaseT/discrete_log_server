@@ -7,7 +7,7 @@ pub mod prelude {
 
 pub use utils::*;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct PollardsLogItem {
     pub i: usize,
     pub xi: u64,
@@ -130,13 +130,13 @@ impl Iterator for PollardsLog {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct PollardsRSAFactItem {
-    i: usize,
-    xi: u64,
-    yi: u64,
-    g: u64,
-    n: u64
+    pub i: usize,
+    pub xi: u64,
+    pub yi: u64,
+    pub g: u64,
+    pub n: u64
 }
 
 #[derive(Debug)]
