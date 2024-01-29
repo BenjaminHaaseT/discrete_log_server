@@ -173,7 +173,70 @@ impl BytesDeser for Response {
                 Response::deserialize_4_bytes(tag, 9, &mut prob);
                 Response::Prime { p, prob: f32::from_bits(prob) }
             }
-            _ => todo!()
+            4 => {
+                let mut i = 0;
+                let mut xi = 0;
+                let mut ai = 0;
+                let mut bi = 0;
+                let mut yi = 0;
+                let mut gi = 0;
+                let mut di = 0;
+                Response::deserialize_8_bytes(tag, 1, &mut i);
+                Response::deserialize_8_bytes(tag, 9, &mut xi);
+                Response::deserialize_8_bytes(tag, 17, &mut ai);
+                Response::deserialize_8_bytes(tag, 25, &mut bi);
+                Response::deserialize_8_bytes(tag, 33, &mut yi);
+                Response::deserialize_8_bytes(tag, 41, &mut gi);
+                Response::deserialize_8_bytes(tag, 49, &mut di);
+                Response::LogItem { item: PollardsLogItem {
+                    i: i as usize,
+                    xi,
+                    ai,
+                    bi,
+                    yi,
+                    gi,
+                    di
+                } }
+            }
+            5 => {
+                let mut log = 0;
+                let mut g = 0;
+                let mut h = 0;
+                let mut p = 0;
+                Response::deserialize_8_bytes(tag, 1, &mut log);
+                Response::deserialize_8_bytes(tag, 9, &mut g);
+                Response::deserialize_8_bytes(tag, 17, &mut h);
+                Response::deserialize_8_bytes(tag, 25, &mut p);
+                Response::SuccessfulLog { log, g, h, p }
+            }
+            6 => {
+                let (mut g, mut h, mut p) = (0, 0, 0);
+                Response::deserialize_8_bytes(tag, 1, &mut g);
+                Response::deserialize_8_bytes(tag, 9, &mut h);
+                Response::deserialize_8_bytes(tag, 17, &mut p);
+                Response::UnsuccessfulLog { g, h, p }
+            }
+            7 => {
+                let (mut i, mut xi, mut yi, mut g, mut n) = (0, 0, 0, 0, 0);
+                Response::deserialize_8_bytes(tag, 1, &mut i);
+                Response::deserialize_8_bytes(tag, 9, &mut xi);
+                Response::deserialize_8_bytes(tag, 17, &mut yi);
+                Response::deserialize_8_bytes(tag, 25, &mut g);
+                Response::deserialize_8_bytes(tag, 33, &mut n);
+                Response::RSAItem { item: PollardsRSAFactItem { i: i as usize, xi, yi, g, n }}
+            }
+            8 => {
+                let (mut p, mut q) = (0, 0);
+                Response::deserialize_8_bytes(tag, 1, &mut p);
+                Response::deserialize_8_bytes(tag, 9, &mut q);
+                Response::SuccessfulRSA { p, q }
+            }
+            9 => {
+                let mut n = 0;
+                Response::deserialize_8_bytes(tag, 1, &mut n);
+                Response::UnsuccessfulRSA { n }
+            }
+            _ => panic!("Invalid type byte detected when deserializing `Response`")
         }
     }
 }
