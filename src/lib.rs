@@ -435,15 +435,6 @@ mod tests {
 
     #[test]
     fn deserialize_frame_should_work() {
-        // let frame = Frame::Connect;
-        // let tag = frame.serialize();
-        // println!("{:?}", tag);
-        // assert_eq!(tag, [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-
-        // let deserialized_frame = Frame::deserialize(&tag);
-        // println!("{:?}", deserialized_frame);
-        // assert_eq!(deserialized_frame, frame);
-
         let frame = Frame::Log { g: 3, h: 2, p: 7 };
         let tag = frame.serialize();
         println!("{:?}", tag);
@@ -497,6 +488,55 @@ mod tests {
         let deserialized_frame = Frame::deserialize(&tag);
         println!("{:?}", deserialized_frame);
         assert_eq!(deserialized_frame, frame);
+    }
+
+    #[test]
+    fn serialize_response_should_work() {
+        let response = Response::ConnectionOk;
+        let tag = response.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        let response = Response::NotPrime { p: 8 };
+        let tag = response.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [2, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+
+        let response = Response::Prime { p: 31, prob: 0.9942 };
+        let tag = response.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [3, 31, 0, 0, 0, 0, 0, 0, 0, 228, 131, 126, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        let response = Response::LogItem { item: PollardsLogItem { i: 3, xi: 127, yi: 64, ai: 128, bi: 32, gi: 55, di: 89}};
+        let tag = response.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [4, 3, 0, 0, 0, 0, 0, 0, 0, 127, 0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 55, 0, 0, 0, 0, 0, 0, 0, 89, 0, 0, 0, 0, 0, 0, 0]);
+
+        let response = Response::SuccessfulLog { log: 11, g: 2, h: 63, p: 71 };
+        let tag = response.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [5, 11, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 63, 0, 0, 0, 0, 0, 0, 0, 71, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        let response = Response::UnsuccessfulLog { g: 2, h: 63, p: 71 };
+        let tag = response.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [6, 2, 0, 0, 0, 0, 0, 0, 0, 63, 0, 0, 0, 0, 0, 0, 0, 71, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,]);
+
+        let response = Response::RSAItem { item: PollardsRSAFactItem { i: 1, xi: 2, yi: 3, g: 1, n: 15}};
+        let tag = response.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [7, 1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        let response = Response::SuccessfulRSA { p: 3, q: 5 };
+        let tag = response.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [8, 3, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        let response = Response::UnsuccessfulRSA { n: 15 };
+        let tag = response.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [9, 15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     }
 }
 
