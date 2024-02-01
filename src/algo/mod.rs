@@ -18,7 +18,7 @@ pub struct PollardsLogItem {
     pub di: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct PollardsLog {
     p: u64,
     g: u64,
@@ -139,7 +139,7 @@ pub struct PollardsRSAFactItem {
     pub n: u64
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct PollardsRSAFact {
     n: u64,
     i: usize,
