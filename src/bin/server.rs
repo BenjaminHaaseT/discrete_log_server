@@ -2,12 +2,13 @@
 use std::fmt::{Debug, Display};
 use std::sync::{Arc};
 use tokio::net::{ToSocketAddrs, TcpStream, TcpListener};
-use tokio_stream::wrappers::TcpListenerStream;
+use tokio_stream::wrappers::{TcpListenerStream, ReceiverStream};
 use tokio::sync::{mpsc::{self, channel, Receiver, Sender}};
 use tokio::task::{self, JoinError, JoinHandle};
+use tokio::io::{AsyncWriteExt, AsyncWrite};
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{instrument, error, debug, info, warn};
-use futures::{stream::{Stream, StreamExt}};
+use futures::{stream::{Stream, StreamExt, FusedStream}, select, future::{FutureExt, FusedFuture, Fuse}, stream};
 use tokio::net::tcp::OwnedWriteHalf;
 use uuid::Uuid;
 
@@ -107,12 +108,6 @@ async fn client_read_task(socket: TcpStream, broker_send: Sender<Event>) -> Resu
                 info!(peer_id = ?peer_id, "Client {} read task is exiting loop", peer_id);
                 break;
             },
-            f => {
-                // Create error for logging, this case should not happen
-                let error = ServerError::IllegalFrame(peer_id, f);
-                error!(error = ?error, "Illegal frame received from client {}", peer_id);
-                return Err(error);
-            }
         };
 
         // Send the event to the broker
@@ -139,10 +134,44 @@ async fn client_read_task(socket: TcpStream, broker_send: Sender<Event>) -> Resu
 ///
 /// # Returns
 /// `Result<(), ServerError>`, In the success case a `Ok(())` will be returned, otherwise `Err(ServerError)`.
-// #[instrument(ret, err, skip(client_writer, broker_recv, token))]
-// async fn client_write_task(peer_id: Uuid, client_writer: OwnedWriteHalf, broker_recv: Receiver<Response>, token: CancellationToken) -> Result<(), ServerError> {
-//     todo!()
-// }
+#[instrument(ret, err, skip(client_writer, broker_recv, token))]
+async fn client_write_task(peer_id: Uuid, client_writer: OwnedWriteHalf, broker_recv: Receiver<Response>, token: CancellationToken) -> Result<(), ServerError> {
+    debug!(peer_id = ?peer_id, "inside client write task");
+    let mut client_writer = client_writer;
+    let mut broker_recv = ReceiverStream::new(broker_recv).fuse();
+    let mut shutdown_signal = Box::pin(token.cancelled().fuse());
+
+    loop {
+        let response = select! {
+            resp = broker_recv.select_next_some().fuse() => resp,
+            _ = shutdown_signal => {
+                info!(peer_id = ?peer_id, "client {} write task received shutdown signal", peer_id);
+                break;
+            }
+        };
+
+        // Check if a response needs to be written back to the client as a stream
+        if let Response::Log { mut pollards} = response {
+            // Stream the data from running pollards algorithm, writing each log item back to the client
+            while let Some(log_item) = StreamExt::next(&mut pollards).await {
+                client_writer.write_all(&Response::LogItem { item: log_item }.serialize())
+                    .await
+                    .map_err(|e| ServerError::Write(e))?;
+            }
+            // Then check if the discrete logarithm is solvable
+            // TODO: add the steps/sqrt modulus ratio as part of the response
+            if let Some(log) = pollards.solve() {
+                client_writer.write_all(&Response::SuccessfulLog { log, g: pollards.g, h: pollards.h, p: pollards.p }.serialize())
+                    .await
+                    .map_err(|e| ServerError::Write(e))?;
+            }
+        } else if let Response::RSA { mut pollards } = response {
+            todo!()
+        }
+    }
+
+    todo!()
+}
 
 async fn main_broker(events: Receiver<Event>) -> Result<(), ServerError> {
     todo!()
@@ -155,6 +184,7 @@ pub enum ServerError<> {
     IllegalFrame(Uuid, Frame),
     Read(std::io::Error),
     Task(JoinError),
+    Write(std::io::Error),
 }
 
 impl Display for ServerError {

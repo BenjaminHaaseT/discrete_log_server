@@ -1,5 +1,9 @@
 use std::iter::Iterator;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use rand::prelude::*;
+use futures::stream::{FusedStream, Stream};
+use futures::StreamExt;
 
 pub mod prelude {
     pub use super::*;
@@ -20,9 +24,9 @@ pub struct PollardsLogItem {
 
 #[derive(Debug, PartialEq)]
 pub struct PollardsLog {
-    p: u64,
-    g: u64,
-    h: u64,
+    pub p: u64,
+    pub g: u64,
+    pub h: u64,
     i: usize,
     xi: u64,
     yi: u64,
@@ -58,7 +62,7 @@ impl PollardsLog {
         }
     }
 
-    fn solve(&self) -> Option<u64> {
+    pub fn solve(&self) -> Option<u64> {
         assert!(self.xi == self.yi);
         // Compute the exponents after combining like terms
         let u = if self.ai >= self.gi {
@@ -129,6 +133,25 @@ impl Iterator for PollardsLog {
         })
     }
 }
+
+impl Stream for PollardsLog {
+    type Item = PollardsLogItem;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<PollardsLogItem>> {
+        if !self.finished {
+            return Poll::Ready(Iterator::next(self.get_mut()));
+        }
+        Poll::Ready(None)
+    }
+}
+
+impl FusedStream for PollardsLog {
+    fn is_terminated(&self) -> bool {
+        self.finished
+    }
+}
+
+// impl StreamExt for PollardsLog {}
 
 #[derive(Debug, PartialEq)]
 pub struct PollardsRSAFactItem {

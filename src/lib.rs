@@ -93,6 +93,20 @@ impl Response {
             *val ^= (tag[i + idx] as u32) << (i * 8);
         }
     }
+
+    pub fn is_log(&self) -> bool {
+        match self {
+            Response::Log { pollards } => true,
+            _ => false
+        }
+    }
+
+    pub fn is_rsa(&self) -> bool {
+        match self {
+            Response::RSA { pollards} => true,
+            _ => false,
+        }
+    }
 }
 
 impl BytesSer for Response {
