@@ -51,7 +51,7 @@ pub enum Response {
     LogItem { item: PollardsLogItem },
 
     /// The result of successfully computing the discrete logarithm
-    SuccessfulLog { log: u64, g: u64, h: u64, p: u64, ratio: f32 },
+    SuccessfulLog { log: u64, g: u64, h: u64, p: u64, ratio: f64 },
 
     /// Informs client that algorithm was unsuccessfully able to determine the discrete log
     UnsuccessfulLog { g: u64, h: u64, p: u64 },
@@ -141,7 +141,7 @@ impl BytesSer for Response {
                 Response::serialize_8_bytes(&mut tag, 9, *g);
                 Response::serialize_8_bytes(&mut tag, 17, *h);
                 Response::serialize_8_bytes(&mut tag, 25, *p);
-                Response::serialize_4_bytes(&mut tag, 33, ratio.to_bits());
+                Response::serialize_8_bytes(&mut tag, 33, ratio.to_bits());
             }
             Response::UnsuccessfulLog { g, h, p} => {
                 tag[0] ^= 6;
@@ -224,8 +224,8 @@ impl BytesDeser for Response {
                 Response::deserialize_8_bytes(tag, 9, &mut g);
                 Response::deserialize_8_bytes(tag, 17, &mut h);
                 Response::deserialize_8_bytes(tag, 25, &mut p);
-                Response::deserialize_4_bytes(tag, 33, &mut ratio_bits);
-                let ratio = unsafe { std::mem::transmute::<u32, f32>(ratio_bits) };
+                Response::deserialize_8_bytes(tag, 33, &mut ratio_bits);
+                let ratio = unsafe { std::mem::transmute::<u64, f64>(ratio_bits) };
                 Response::SuccessfulLog { log, g, h, p, ratio }
             }
             6 => {
@@ -533,10 +533,11 @@ mod tests {
         assert_eq!(tag, [4, 3, 0, 0, 0, 0, 0, 0, 0, 127, 0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 55, 0, 0, 0, 0, 0, 0, 0, 89, 0, 0, 0, 0, 0, 0, 0]);
 
         let response = Response::SuccessfulLog { log: 11, g: 2, h: 63, p: 71, ratio: 0.012839 };
-        let ratio_bits = f32::to_bits(0.012839);
+        let ratio_bits = f64::to_bits(0.012839);
+        println!("{:x}", ratio_bits);
         let tag = response.serialize();
         println!("{:?}", tag);
-        assert_eq!(tag, [5, 11, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 63, 0, 0, 0, 0, 0, 0, 0, 71, 0, 0, 0, 0, 0, 0, 0, 171, 90, 82, 60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(tag, [5, 11, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 63, 0, 0, 0, 0, 0, 0, 0, 71, 0, 0, 0, 0, 0, 0, 0, 230, 32, 232, 104, 85, 75, 138, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
         let response = Response::UnsuccessfulLog { g: 2, h: 63, p: 71 };
         let tag = response.serialize();
@@ -600,7 +601,7 @@ mod tests {
         let response = Response::SuccessfulLog { log: 11, g: 2, h: 63, p: 71, ratio:  0.012839 };
         let tag = response.serialize();
         println!("{:?}", tag);
-        assert_eq!(tag, [5, 11, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 63, 0, 0, 0, 0, 0, 0, 0, 71, 0, 0, 0, 0, 0, 0, 0, 171, 90, 82, 60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(tag, [5, 11, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 63, 0, 0, 0, 0, 0, 0, 0, 71, 0, 0, 0, 0, 0, 0, 0, 230, 32, 232, 104, 85, 75, 138, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
         let deserialized_response = Response::deserialize(&tag);
         println!("{:?}", deserialized_response);
