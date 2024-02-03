@@ -319,7 +319,7 @@ mod test {
     #[test]
     fn pollards_log_iter_test() {
         let mut pollard = PollardsLog::new(48611, 19, 24717);
-        while let Some(item) = pollard.next() {
+        while let Some(item) = Iterator::next(&mut pollard) {
             println!("{:?}", item);
         }
         println!("{:?}", pollard);
