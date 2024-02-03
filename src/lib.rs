@@ -63,7 +63,7 @@ pub enum Response {
     RSAItem { item: PollardsRSAFactItem },
 
     /// Informs the client that the algorithm successfully factored the RSA key
-    SuccessfulRSA { p: u64, q: u64 },
+    SuccessfulRSA { p: u64, q: u64, ratio: f64 },
 
     /// Informs the client that the algorithm was unsuccessfully able to factor the RSA key
     UnsuccessfulRSA { n: u64 }
@@ -157,10 +157,11 @@ impl BytesSer for Response {
                 Response::serialize_8_bytes(&mut tag, 25, item.g);
                 Response::serialize_8_bytes(&mut tag, 33, item.n);
             }
-            Response::SuccessfulRSA { p, q} => {
+            Response::SuccessfulRSA { p, q, ratio } => {
                 tag[0] ^= 8;
                 Response::serialize_8_bytes(&mut tag, 1, *p);
                 Response::serialize_8_bytes(&mut tag, 9, *q);
+                Response::serialize_8_bytes(&mut tag, 17, ratio.to_bits());
             }
             Response::UnsuccessfulRSA {n} => {
                 tag[0] ^= 9;
@@ -225,7 +226,8 @@ impl BytesDeser for Response {
                 Response::deserialize_8_bytes(tag, 17, &mut h);
                 Response::deserialize_8_bytes(tag, 25, &mut p);
                 Response::deserialize_8_bytes(tag, 33, &mut ratio_bits);
-                let ratio = unsafe { std::mem::transmute::<u64, f64>(ratio_bits) };
+                // let ratio = unsafe { std::mem::transmute::<u64, f64>(ratio_bits) };
+                let ratio = f64::from_bits(ratio_bits);
                 Response::SuccessfulLog { log, g, h, p, ratio }
             }
             6 => {
@@ -245,10 +247,12 @@ impl BytesDeser for Response {
                 Response::RSAItem { item: PollardsRSAFactItem { i: i as usize, xi, yi, g, n }}
             }
             8 => {
-                let (mut p, mut q) = (0, 0);
+                let (mut p, mut q, mut ratio_bits) = (0, 0, 0);
                 Response::deserialize_8_bytes(tag, 1, &mut p);
                 Response::deserialize_8_bytes(tag, 9, &mut q);
-                Response::SuccessfulRSA { p, q }
+                Response::deserialize_8_bytes(tag, 17, &mut ratio_bits);
+                let ratio = f64::from_bits(ratio_bits);
+                Response::SuccessfulRSA { p, q, ratio }
             }
             9 => {
                 let mut n = 0;
@@ -533,8 +537,6 @@ mod tests {
         assert_eq!(tag, [4, 3, 0, 0, 0, 0, 0, 0, 0, 127, 0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 55, 0, 0, 0, 0, 0, 0, 0, 89, 0, 0, 0, 0, 0, 0, 0]);
 
         let response = Response::SuccessfulLog { log: 11, g: 2, h: 63, p: 71, ratio: 0.012839 };
-        let ratio_bits = f64::to_bits(0.012839);
-        println!("{:x}", ratio_bits);
         let tag = response.serialize();
         println!("{:?}", tag);
         assert_eq!(tag, [5, 11, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 63, 0, 0, 0, 0, 0, 0, 0, 71, 0, 0, 0, 0, 0, 0, 0, 230, 32, 232, 104, 85, 75, 138, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
@@ -549,10 +551,10 @@ mod tests {
         println!("{:?}", tag);
         assert_eq!(tag, [7, 1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
-        let response = Response::SuccessfulRSA { p: 3, q: 5 };
+        let response = Response::SuccessfulRSA { p: 3, q: 5, ratio: 0.012839 };
         let tag = response.serialize();
         println!("{:?}", tag);
-        assert_eq!(tag, [8, 3, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(tag, [8, 3, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 230, 32, 232, 104, 85, 75, 138, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
         let response = Response::UnsuccessfulRSA { n: 15 };
         let tag = response.serialize();
@@ -625,10 +627,10 @@ mod tests {
         println!("{:?}", deserialized_response);
         assert_eq!(deserialized_response, response);
 
-        let response = Response::SuccessfulRSA { p: 3, q: 5 };
+        let response = Response::SuccessfulRSA { p: 3, q: 5, ratio: 0.012839 };
         let tag = response.serialize();
         println!("{:?}", tag);
-        assert_eq!(tag, [8, 3, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(tag, [8, 3, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 230, 32, 232, 104, 85, 75, 138, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
         let deserialized_response = Response::deserialize(&tag);
         println!("{:?}", deserialized_response);
