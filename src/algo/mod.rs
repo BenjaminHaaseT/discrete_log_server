@@ -137,11 +137,14 @@ impl Iterator for PollardsLog {
 impl Stream for PollardsLog {
     type Item = PollardsLogItem;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<PollardsLogItem>> {
-        if !self.finished {
-            return Poll::Ready(Iterator::next(self.get_mut()));
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<PollardsLogItem>> {
+        match Iterator::next(&mut *self) {
+            Some(item) => Poll::Ready(Some(item)),
+            _ => {
+                self.finished = true;
+                Poll::Ready(None)
+            }
         }
-        Poll::Ready(None)
     }
 }
 
@@ -164,7 +167,7 @@ pub struct PollardsRSAFactItem {
 
 #[derive(Debug, PartialEq)]
 pub struct PollardsRSAFact {
-    n: u64,
+    pub n: u64,
     i: usize,
     xi: u64,
     yi: u64,
@@ -207,6 +210,25 @@ impl Iterator for PollardsRSAFact {
             self.factor = Some(g);
         }
         Some(PollardsRSAFactItem { i: self.i, xi: self.xi, yi: self.yi, g, n: self.n })
+    }
+}
+
+impl Stream for PollardsRSAFact {
+    type Item = PollardsRSAFactItem;
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match Iterator::next(&mut *self) {
+            Some(item) => Poll::Ready(Some(item)),
+            _ => {
+                self.finished = true;
+                Poll::Ready(None)
+            }
+        }
+    }
+}
+
+impl FusedStream for PollardsRSAFact {
+    fn is_terminated(&self) -> bool {
+        self.finished
     }
 }
 

@@ -137,11 +137,13 @@ async fn client_read_task(socket: TcpStream, broker_send: Sender<Event>) -> Resu
 #[instrument(ret, err, skip(client_writer, broker_recv, token))]
 async fn client_write_task(peer_id: Uuid, client_writer: OwnedWriteHalf, broker_recv: Receiver<Response>, token: CancellationToken) -> Result<(), ServerError> {
     debug!(peer_id = ?peer_id, "inside client write task");
+    // Get mutable versions for writing
     let mut client_writer = client_writer;
     let mut broker_recv = ReceiverStream::new(broker_recv).fuse();
     let mut shutdown_signal = Box::pin(token.cancelled().fuse());
 
     loop {
+        // Select over possible receiving channels
         let response = select! {
             resp = broker_recv.select_next_some().fuse() => resp,
             _ = shutdown_signal => {
@@ -150,27 +152,72 @@ async fn client_write_task(peer_id: Uuid, client_writer: OwnedWriteHalf, broker_
             }
         };
 
-        // Check if a response needs to be written back to the client as a stream
-        if let Response::Log { mut pollards} = response {
-            // Stream the data from running pollards algorithm, writing each log item back to the client
-            while let Some(log_item) = StreamExt::next(&mut pollards).await {
-                client_writer.write_all(&Response::LogItem { item: log_item }.serialize())
+        info!(response = ?response, peer_id = ?peer_id, "client write task received response from broker");
+
+        match response {
+            Response::ConnectionOk => {
+                client_writer.write_all(&Response::ConnectionOk.serialize())
                     .await
                     .map_err(|e| ServerError::Write(e))?;
             }
-            // Then check if the discrete logarithm is solvable
-            // TODO: add the steps/sqrt modulus ratio as part of the response
-            if let Some(log) = pollards.solve() {
-                client_writer.write_all(&Response::SuccessfulLog { log, g: pollards.g, h: pollards.h, p: pollards.p }.serialize())
+            Response::NotPrime { p } => {
+                client_writer.write_all(&Response::NotPrime{ p }.serialize() )
                     .await
                     .map_err(|e| ServerError::Write(e))?;
             }
-        } else if let Response::RSA { mut pollards } = response {
-            todo!()
+            Response::Prime { p, prob } => {
+                client_writer.write_all(&Response::Prime { p, prob }.serialize())
+                    .await
+                    .map_err(|e| ServerError::Write(e))?;
+            }
+            Response::Log { mut pollards } => {
+                while let Some(log_item) = StreamExt::next(&mut pollards).await {
+                    client_writer.write_all(&Response::LogItem { item: log_item }.serialize())
+                        .await
+                        .map_err(|e| ServerError::Write(e))?;
+                }
+                // Check if the discrete log is solvable
+                if let Some(log) = pollards.solve() {
+                    info!(peer_id = ?peer_id, "discrete logarithm solved successfully");
+                    let ratio = pollards.steps_to_sqrt_mod_ratio();
+                    client_writer.write_all(&Response::SuccessfulLog { log, g: pollards.g, h: pollards.h, p: pollards.p, ratio }.serialize())
+                        .await
+                        .map_err(|e| ServerError::Write(e))?;
+                } else {
+                    info!(peer_id = ?peer_id, "discrete logarithm not solved");
+                    // We need to inform the client that solving the logarithm was unsuccessful
+                    client_writer.write_all(&Response::UnsuccessfulLog { g: pollards.g, h: pollards.h, p: pollards.p }.serialize())
+                        .await
+                        .map_err(|e| ServerError::Write(e))?;
+                }
+            }
+            Response::RSA { mut pollards } => {
+                while let Some(rsa_item) = StreamExt::next(&mut pollards).await {
+                    client_writer.write_all(&Response::RSAItem { item: rsa_item }.serialize())
+                        .await
+                        .map_err(|e| ServerError::Write(e))?;
+                }
+                // Check if we were able to factor the public key
+                if let Some(p) = pollards.factor() {
+                    info!(peer_id = ?peer_id, "public key factored successfully");
+                    let q = pollards.n / p;
+                    let ratio = pollards.steps_to_sqrt_mod_ratio();
+                    client_writer.write_all(&Response::SuccessfulRSA { p, q, ratio }.serialize())
+                        .await
+                        .map_err(|e| ServerError::Write(e))?;
+                } else {
+                    info!(peer_id = ?peer_id, "public key not factored successfully");
+                    // Otherwise we need to inform client factorization was unsuccessful
+                    client_writer.write_all(&Response::UnsuccessfulRSA { n: pollards.n }.serialize())
+                        .await
+                        .map_err(|e| ServerError::Write(e))?;
+                }
+            }
+            r => return Err(ServerError::IllegalResponse(peer_id, r))
         }
     }
 
-    todo!()
+    Ok(())
 }
 
 async fn main_broker(events: Receiver<Event>) -> Result<(), ServerError> {
@@ -182,6 +229,7 @@ pub enum ServerError<> {
     Connection(std::io::Error),
     ChannelSend(String),
     IllegalFrame(Uuid, Frame),
+    IllegalResponse(Uuid, Response),
     Read(std::io::Error),
     Task(JoinError),
     Write(std::io::Error),
