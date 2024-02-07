@@ -1,16 +1,21 @@
 //! The executable for running the server
 use std::fmt::{Debug, Display};
+use std::collections::HashMap;
 use std::sync::{Arc};
+use rand;
+use rand::Rng;
 use tokio::net::{ToSocketAddrs, TcpStream, TcpListener};
-use tokio_stream::wrappers::{TcpListenerStream, ReceiverStream};
-use tokio::sync::{mpsc::{self, channel, Receiver, Sender}};
+use tokio_stream::wrappers::{TcpListenerStream, ReceiverStream, UnboundedReceiverStream};
+use tokio::sync::{mpsc::{self, channel, unbounded_channel, UnboundedSender, UnboundedReceiver, Receiver, Sender}};
 use tokio::task::{self, JoinError, JoinHandle};
 use tokio::io::{AsyncWriteExt, AsyncWrite};
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{instrument, error, debug, info, warn};
 use futures::{stream::{Stream, StreamExt, FusedStream}, select, future::{FutureExt, FusedFuture, Fuse}, stream};
+use rand::thread_rng;
 use tokio::net::tcp::OwnedWriteHalf;
 use uuid::Uuid;
+use discrete_log_server::algo::miller_rabin;
 
 use discrete_log_server::prelude::*;
 
@@ -34,7 +39,7 @@ async fn accept_loop(server_addrs: impl ToSocketAddrs + Debug + Clone, buf_size:
     let (broker_send, broker_recv) = channel::<Event>(buf_size);
 
     // Spawn broker task
-    let mut broker_handle = task::spawn(main_broker(broker_recv));
+    let mut broker_handle = task::spawn(main_broker(broker_recv, buf_size));
     debug!("broker task spawned");
 
     // Accept loop
@@ -135,17 +140,26 @@ async fn client_read_task(socket: TcpStream, broker_send: Sender<Event>) -> Resu
 /// # Returns
 /// `Result<(), ServerError>`, In the success case a `Ok(())` will be returned, otherwise `Err(ServerError)`.
 #[instrument(ret, err, skip(client_writer, broker_recv, token))]
-async fn client_write_task(peer_id: Uuid, client_writer: OwnedWriteHalf, broker_recv: Receiver<Response>, token: CancellationToken) -> Result<(), ServerError> {
+async fn client_write_task(peer_id: Uuid, client_writer: &mut OwnedWriteHalf, broker_recv: &mut Receiver<Response>, token: CancellationToken) -> Result<(), ServerError> {
     debug!(peer_id = ?peer_id, "inside client write task");
     // Get mutable versions for writing
     let mut client_writer = client_writer;
-    let mut broker_recv = ReceiverStream::new(broker_recv).fuse();
+    // let mut broker_recv = ReceiverStream::new(broker_recv).fuse();
     let mut shutdown_signal = Box::pin(token.cancelled().fuse());
 
     loop {
         // Select over possible receiving channels
         let response = select! {
-            resp = broker_recv.select_next_some().fuse() => resp,
+            resp = broker_recv.recv().fuse() => {
+                match resp {
+                    Some(r) => r,
+                    None => {
+                        // Error state, should not receive none from this receiver
+                        error!(peer_id = ?peer_id, "client {} write task received `None` from broker", peer_id);
+                        return Err(ServerError::ChannelReceive(format!("client {} write task received `None` from broker", peer_id)));
+                    }
+                }
+            },
             _ = shutdown_signal => {
                 info!(peer_id = ?peer_id, "client {} write task received shutdown signal", peer_id);
                 break;
@@ -220,7 +234,104 @@ async fn client_write_task(peer_id: Uuid, client_writer: OwnedWriteHalf, broker_
     Ok(())
 }
 
-async fn main_broker(events: Receiver<Event>) -> Result<(), ServerError> {
+#[instrument(ret, err, skip(events))]
+async fn main_broker(events: Receiver<Event>, buf_size: usize) -> Result<(), ServerError> {
+    // For mapping from client id's to sending channels
+    let mut clients: HashMap<Uuid, Sender<Response>> = HashMap::new();
+    // For harvesting disconnected clients
+    let (shutdown_send, shutdown_recv) = unbounded_channel::<(Uuid, OwnedWriteHalf, Receiver<Response>)>();
+
+    // Convert to stream and fuse for selecting
+    let mut shutdown_recv = UnboundedReceiverStream::new(shutdown_recv).fuse();
+    let mut events = ReceiverStream::new(events).fuse();
+
+    // Listen for incoming events
+    loop {
+        let event = select! {
+            // Either we receive an event
+            event = events.next().fuse() => {
+                match event {
+                    Some(ev) => ev,
+                    None => {
+                        info!("main broker shutting down");
+                        break;
+                    }
+                }
+            },
+            // Or we harvest a disconnected peer
+            (peer_id, client_socket, client_recv) = shutdown_recv.select_next_some().fuse() => {
+                info!(peer_id = ?peer_id, "main broker harvesting client {}", peer_id);
+                clients.remove(&peer_id).ok_or(ServerError::IllegalState(format!("client with id {} should exist", peer_id)))?;
+                continue;
+            }
+        };
+
+        // Match on the event and generate the correct response
+        match event {
+            Event::NewClient { peer_id, mut socket, token } => {
+                // Create new channel for communicating with new client's write task
+                let (client_write_send, mut client_write_recv) = channel::<Response>(buf_size);
+                let mut shutdown_send = shutdown_send.clone();
+                clients.insert(peer_id, client_write_send.clone());
+
+                task::spawn(async move {
+                    let res = client_write_task(peer_id, &mut socket, &mut client_write_recv, token).await;
+                    // Client's write task has finished, send signal back to broker
+                    if let Err(e) = shutdown_send.send((peer_id, socket, client_write_recv)) {
+                        error!(e = ?e, peer_id = ?peer_id,  "error sending shutdown signal to broker");
+                    }
+                    if let Err(e) = res {
+                        error!(e = ?e, peer_id = ?peer_id, "error from client {} write task", peer_id);
+                    }
+                });
+
+                // Send the new client a ConnectionOk response
+                client_write_send.send(Response::ConnectionOk)
+                    .await
+                    .map_err(|e| ServerError::ChannelSend(format!("broker unable to send client {} `ConnectionOk` response after spawning", peer_id)))?;
+            }
+            Event::Prime { peer_id, p } => {
+                // First get the client from the map
+                let client_write = clients.get_mut(&peer_id)
+                    .ok_or(ServerError::IllegalState(format!("client {} should exist in clients hashmap", peer_id)))?;
+
+                // Run the miller rabin test
+                let (prime_flag, prob) = task::spawn_blocking(move || {
+                    let mut rng = thread_rng();
+                    let mut i = 0;
+                    let mut prime_flag = true;
+                    while i < 20 {
+                        let a = rng.gen_range(2..p);
+                        if miller_rabin(p, a) {
+                            prime_flag = false;
+                            break;
+                        }
+                        i += 1;
+                    }
+                    if prime_flag {
+                        (prime_flag, 1.0 - f32::powi(0.25, 20))
+                    } else {
+                        (prime_flag, 0.0)
+                    }
+                })
+                    .await
+                    .map_err(|e| ServerError::Task(e))?;
+
+                // Send the correct response accordingly
+                if prime_flag {
+                    client_write.send(Response::Prime { p, prob })
+                        .await
+                        .map_err(|e| ServerError::ChannelSend(format!("broker unable to send `Prime` response to client {} write task", peer_id)))?;
+                } else {
+                    client_write.send(Response::NotPrime { p })
+                        .await
+                        .map_err(|e| ServerError::ChannelSend(format!("broker unable to send `NotPrime` response to client {} write task", peer_id)))?;
+                }
+            }
+            _ => todo!()
+        }
+    }
+
     todo!()
 }
 
@@ -228,8 +339,10 @@ async fn main_broker(events: Receiver<Event>) -> Result<(), ServerError> {
 pub enum ServerError<> {
     Connection(std::io::Error),
     ChannelSend(String),
+    ChannelReceive(String),
     IllegalFrame(Uuid, Frame),
     IllegalResponse(Uuid, Response),
+    IllegalState(String),
     Read(std::io::Error),
     Task(JoinError),
     Write(std::io::Error),
