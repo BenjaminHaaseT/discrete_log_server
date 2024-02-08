@@ -159,7 +159,7 @@ async fn client_write_task(peer_id: Uuid, client_writer: &mut OwnedWriteHalf, br
                     None => {
                         // Error state, should not receive none from this receiver
                         error!(peer_id = ?peer_id, "client {} write task received `None` from broker", peer_id);
-                        return Err(ServerError::ChannelReceive(format!("client {} write task received `None` from broker", peer_id)));
+                        return Err(ServerError::ChannelReceive(format!("client {} write task received `None` from main broker", peer_id)));
                     }
                 }
             },
@@ -169,7 +169,7 @@ async fn client_write_task(peer_id: Uuid, client_writer: &mut OwnedWriteHalf, br
             }
         };
 
-        info!(response = ?response, peer_id = ?peer_id, "client write task received response from broker");
+        info!(response = ?response, peer_id = ?peer_id, "client write task received response from main broker");
 
         match response {
             Response::ConnectionOk => {
@@ -281,7 +281,7 @@ async fn main_broker(events: Receiver<Event>, buf_size: usize) -> Result<(), Ser
                     let res = client_write_task(peer_id, &mut socket, &mut client_write_recv, token).await;
                     // Client's write task has finished, send signal back to broker
                     if let Err(e) = shutdown_send.send((peer_id, socket, client_write_recv)) {
-                        error!(e = ?e, peer_id = ?peer_id,  "error sending shutdown signal to broker");
+                        error!(e = ?e, peer_id = ?peer_id,  "error sending shutdown signal to main broker");
                     }
                     if let Err(e) = res {
                         error!(e = ?e, peer_id = ?peer_id, "error from client {} write task", peer_id);
@@ -291,7 +291,7 @@ async fn main_broker(events: Receiver<Event>, buf_size: usize) -> Result<(), Ser
                 // Send the new client a ConnectionOk response
                 client_write_send.send(Response::ConnectionOk)
                     .await
-                    .map_err(|e| ServerError::ChannelSend(format!("broker unable to send client {} `ConnectionOk` response after spawning", peer_id)))?;
+                    .map_err(|e| ServerError::ChannelSend(format!("main broker unable to send client {} `ConnectionOk` response after spawning", peer_id)))?;
             }
             Event::Prime { peer_id, p } => {
                 // First get the client from the map
@@ -324,11 +324,11 @@ async fn main_broker(events: Receiver<Event>, buf_size: usize) -> Result<(), Ser
                 if prime_flag {
                     client_write.send(Response::Prime { p, prob })
                         .await
-                        .map_err(|e| ServerError::ChannelSend(format!("broker unable to send `Prime` response to client {} write task", peer_id)))?;
+                        .map_err(|e| ServerError::ChannelSend(format!("main broker unable to send `Prime` response to client {} write task", peer_id)))?;
                 } else {
                     client_write.send(Response::NotPrime { p })
                         .await
-                        .map_err(|e| ServerError::ChannelSend(format!("broker unable to send `NotPrime` response to client {} write task", peer_id)))?;
+                        .map_err(|e| ServerError::ChannelSend(format!("main broker unable to send `NotPrime` response to client {} write task", peer_id)))?;
                 }
             }
             Event::Log { peer_id,  g, h, p } => {
@@ -336,16 +336,16 @@ async fn main_broker(events: Receiver<Event>, buf_size: usize) -> Result<(), Ser
                     .ok_or(ServerError::IllegalState(format!("client {} should exist in clients hashmap", peer_id)))?;
                 client_write.send(Response::Log { pollards: PollardsLog::new(p, g, h) })
                     .await
-                    .map_err(|e| ServerError::ChannelSend(format!("broker unable to send `Log` response to client {} write task", peer_id)))?;
+                    .map_err(|e| ServerError::ChannelSend(format!("main broker unable to send `Log` response to client {} write task", peer_id)))?;
             }
             Event::RSA { peer_id, n} => {
                 let mut client_write = clients.get_mut(&peer_id)
                     .ok_or(ServerError::IllegalState(format!("client {} should exist in clients hashmap", peer_id)))?;
                 client_write.send(Response::RSA { pollards: PollardsRSAFact::new(n) })
                     .await
-                    .map_err(|e| ServerError::ChannelSend(format!("broker unable to send `Log` response to client {} write task", peer_id)))?;
+                    .map_err(|e| ServerError::ChannelSend(format!("main broker unable to send `Log` response to client {} write task", peer_id)))?;
             }
-            Event::Quit { peer_id } => info!(peer_id = ?peer_id, "broker received `Quit` event from client {}", peer_id),
+            Event::Quit { peer_id } => info!(peer_id = ?peer_id, "main broker received `Quit` event from client {}", peer_id),
         }
     }
 
@@ -375,7 +375,15 @@ pub enum ServerError<> {
 impl Display for ServerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            _ => write!(f, "")
+            ServerError::Connection(e) => write!(f, "{:?}", e),
+            ServerError::ChannelSend(s) => write!(f, "{s}"),
+            ServerError::ChannelReceive(s) => write!(f, "{s}"),
+            ServerError::IllegalFrame(id, frame) => write!(f, "illegal frame from client {}: {:?}", id, frame),
+            ServerError::IllegalResponse(id, response) => write!(f, "illegal response received by client {}: {:?}", id, response),
+            ServerError::IllegalState(s) => write!(f, "{s}"),
+            ServerError::Read(e) => write!(f, "{:?}", e),
+            ServerError::Task(e) => write!(f, "{:?}", e),
+            ServerError::Write(e) => write!(f, "{:?}", e),
         }
     }
 }
