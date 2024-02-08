@@ -15,7 +15,7 @@ use futures::{stream::{Stream, StreamExt, FusedStream}, select, future::{FutureE
 use rand::thread_rng;
 use tokio::net::tcp::OwnedWriteHalf;
 use uuid::Uuid;
-use discrete_log_server::algo::miller_rabin;
+use discrete_log_server::algo::{miller_rabin, PollardsLog, PollardsRSAFact};
 
 use discrete_log_server::prelude::*;
 
@@ -54,10 +54,13 @@ async fn accept_loop(server_addrs: impl ToSocketAddrs + Debug + Clone, buf_size:
         }
     }
 
-    // TODO: graceful shutdown routine
+    info!("accept loop dropping broker sender, initiating graceful shutdown");
+    drop(broker_send);
+
     broker_handle
         .await
         .map_err(|e| ServerError::Task(e))??;
+
     Ok(())
 }
 
@@ -328,11 +331,32 @@ async fn main_broker(events: Receiver<Event>, buf_size: usize) -> Result<(), Ser
                         .map_err(|e| ServerError::ChannelSend(format!("broker unable to send `NotPrime` response to client {} write task", peer_id)))?;
                 }
             }
-            _ => todo!()
+            Event::Log { peer_id,  g, h, p } => {
+                let mut client_write = clients.get_mut(&peer_id)
+                    .ok_or(ServerError::IllegalState(format!("client {} should exist in clients hashmap", peer_id)))?;
+                client_write.send(Response::Log { pollards: PollardsLog::new(p, g, h) })
+                    .await
+                    .map_err(|e| ServerError::ChannelSend(format!("broker unable to send `Log` response to client {} write task", peer_id)))?;
+            }
+            Event::RSA { peer_id, n} => {
+                let mut client_write = clients.get_mut(&peer_id)
+                    .ok_or(ServerError::IllegalState(format!("client {} should exist in clients hashmap", peer_id)))?;
+                client_write.send(Response::RSA { pollards: PollardsRSAFact::new(n) })
+                    .await
+                    .map_err(|e| ServerError::ChannelSend(format!("broker unable to send `Log` response to client {} write task", peer_id)))?;
+            }
+            Event::Quit { peer_id } => info!(peer_id = ?peer_id, "broker received `Quit` event from client {}", peer_id),
         }
     }
 
-    todo!()
+    info!("main broker draining shutdown receiver");
+
+    while let Some((peer_id, client_socket, client_recv)) = shutdown_recv.next().await {
+        info!(peer_id = ?peer_id, "main broker harvesting client {}", peer_id);
+        clients.remove(&peer_id).ok_or(ServerError::IllegalState(format!("client with id {} should exist", peer_id)))?;
+    }
+
+    Ok(())
 }
 
 #[derive(Debug)]
