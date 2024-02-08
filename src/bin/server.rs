@@ -1,7 +1,7 @@
 //! The executable for running the server
 use std::fmt::{Debug, Display};
 use std::collections::HashMap;
-use std::sync::{Arc};
+use clap::Parser;
 use rand;
 use rand::Rng;
 use tokio::net::{ToSocketAddrs, TcpStream, TcpListener};
@@ -390,6 +390,27 @@ impl Display for ServerError {
 
 impl std::error::Error for ServerError {}
 
-fn main() {}
+#[derive(Parser)]
+struct Cli {
+    /// The address that the server will listen for incoming clients
+    #[arg(short, long)]
+    address: String,
+
+    /// The port for the address
+    #[arg(short, long)]
+    port: u16,
+
+    /// The size of the channel buffer
+    #[arg(short, long)]
+    buf_size: usize,
+
+}
+
+
+fn main() {
+    let cli = Cli::parse();
+    debug!(address = cli.address, port = cli.port, buf_size = cli.buf_size, "Cli arguments parsed");
+    println!("{}, {}, {}", cli.address, cli.port, cli.buf_size);
+}
 
 
