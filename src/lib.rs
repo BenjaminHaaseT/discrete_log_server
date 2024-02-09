@@ -107,6 +107,19 @@ impl Response {
             _ => false,
         }
     }
+
+    pub fn is_connection_ok(&self) -> bool {
+        match self {
+            Response::ConnectionOk => true,
+            _ => false,
+        }
+    }
+
+    pub async fn from_reader<R: AsyncReadExt>(mut reader: R) -> Result<Self, std::io::Error> {
+        let mut tag = [0u8; 57];
+        reader.read_exact(&mut tag).await?;
+        Ok(Self::deserialize(&tag))
+    }
 }
 
 impl BytesSer for Response {
