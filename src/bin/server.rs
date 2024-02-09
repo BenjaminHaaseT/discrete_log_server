@@ -9,12 +9,14 @@ use tokio_stream::wrappers::{TcpListenerStream, ReceiverStream, UnboundedReceive
 use tokio::sync::{mpsc::{self, channel, unbounded_channel, UnboundedSender, UnboundedReceiver, Receiver, Sender}};
 use tokio::task::{self, JoinError, JoinHandle};
 use tokio::io::{AsyncWriteExt, AsyncWrite};
+use tokio::runtime::Builder;
 use tokio_util::sync::{CancellationToken, DropGuard};
-use tracing::{instrument, error, debug, info, warn};
+use tracing::{instrument, error, debug, info, warn, Level};
 use futures::{stream::{Stream, StreamExt, FusedStream}, select, future::{FutureExt, FusedFuture, Fuse}, stream};
 use rand::thread_rng;
 use tokio::net::tcp::OwnedWriteHalf;
 use uuid::Uuid;
+use tracing_subscriber::{self, EnvFilter};
 use discrete_log_server::algo::{miller_rabin, PollardsLog, PollardsRSAFact};
 
 use discrete_log_server::prelude::*;
@@ -406,11 +408,29 @@ struct Cli {
 
 }
 
-
+#[instrument]
 fn main() {
+    let _ = tracing_subscriber::fmt()
+        .with_level(true)
+        .with_env_filter(EnvFilter::from_default_env())
+        .with_file(true)
+        .with_line_number(true)
+        .init();
+
     let cli = Cli::parse();
     debug!(address = cli.address, port = cli.port, buf_size = cli.buf_size, "Cli arguments parsed");
-    println!("{}, {}, {}", cli.address, cli.port, cli.buf_size);
+
+    let mut rt = Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("unable to build runtime");
+
+    let res = rt.block_on(accept_loop((cli.address.as_str(), cli.port), cli.buf_size));
+    if let Err(e) = res {
+        error!(e = ?e, "error running server");
+    } else {
+        info!("server shutting down")
+    }
 }
 
 
