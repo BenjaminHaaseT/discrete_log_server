@@ -115,7 +115,7 @@ impl Response {
         }
     }
 
-    pub async fn from_reader<R: AsyncReadExt>(mut reader: R) -> Result<Self, std::io::Error> {
+    pub async fn from_reader<R: AsyncReadExt + Unpin>(mut reader: R) -> Result<Self, std::io::Error> {
         let mut tag = [0u8; 57];
         reader.read_exact(&mut tag).await?;
         Ok(Self::deserialize(&tag))
