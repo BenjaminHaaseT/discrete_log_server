@@ -88,7 +88,15 @@ impl Interface {
                             .await
                             .map_err(|e| ClientError::SendRequest(e))?;
                     }
-                    _ => todo!()
+                    "r" => {
+                        let modulus = utils::read_u64("modulus", &mut from_client, &mut stdout)?;
+                        let exponent = utils::read_u64("exponent", &mut from_client, &mut stdout)?;
+                        // create frame and send to server
+                        let frame = Frame::RSA { n: modulus, e: exponent };
+                        to_server.write_all(&frame.as_bytes())
+                            .await
+                            .map_err(|e| ClientError::SendRequest(e))?;
+                    }
                 }
 
             },
