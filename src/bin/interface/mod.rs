@@ -12,6 +12,8 @@ pub enum Interface {
     Home,
     Quit,
     Prime,
+    Log,
+    RSA,
 }
 
 impl Interface {
@@ -87,6 +89,7 @@ impl Interface {
                         to_server.write_all(&frame.as_bytes())
                             .await
                             .map_err(|e| ClientError::SendRequest(e))?;
+                        return Ok(Interface::Log);
                     }
                     "r" => {
                         let modulus = utils::read_u64("modulus", &mut from_client, &mut stdout)?;
@@ -96,8 +99,11 @@ impl Interface {
                         to_server.write_all(&frame.as_bytes())
                             .await
                             .map_err(|e| ClientError::SendRequest(e))?;
+                        return Ok(Interface::RSA);
                     }
+                    _ => todo!()
                 }
+
 
             },
             _ => todo!()
@@ -106,7 +112,6 @@ impl Interface {
         todo!()
     }
 }
-
 
 mod utils {
     use super::*;
