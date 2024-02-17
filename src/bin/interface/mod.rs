@@ -14,6 +14,7 @@ pub enum Interface {
     Prime,
     Log,
     RSA,
+    ReturnInit
 }
 
 impl Interface {
@@ -41,15 +42,102 @@ impl Interface {
                 write!(
                     stdout, "{}{}{}{}{}{}\n",
                     cursor::Goto(1, 5), color::Fg(color::Rgb(225, 247, 244)),
-                    "[q] - Quit", "[:p] - Check if p is prime", "[l] - Solve discrete logarithm", "[r] - Factor RSA public key"
+                    "[q] - Quit ", "[:p:] - Check if p is prime ", "[l] - Solve discrete logarithm ", "[r] - Factor RSA public key "
                 ).map_err(|e| ClientError::Write(e))?;
                 stdout.flush().map_err(|e| ClientError::Write(e))?;
-                // // Display prompt to client
-                // write!(
-                //     stdout, "{}{}", cursor::Goto(1, 6), ">>> "
-                // ).map_err(|e| ClientError::Write(e))?;
-                // stdout.flush().map_err(|e| ClientError::Write(e))?;
                 Ok(Interface::Home)
+            }
+            Interface::Prime => {
+                // match on the response returned from the server
+                match Response::from_reader(&mut from_server)
+                    .await
+                    .map_err(|e| ClientError::Response(e))?
+                {
+                    Response::Prime { p, prob } => {
+                        write!(
+                            stdout, "{}{}{}",
+                            cursor::Goto(1, 5), color::Fg(color::Rgb(225, 247, 244)),
+                            format!("{p} is prime with probability {prob:.10}, press any key to return to menu")
+                        ).map_err(|e| ClientError::Write(e))?;
+                        stdout.flush().map_err(|e| ClientError::Write(e))?;
+                    }
+                    Response::NotPrime { p} => {
+                        write!(
+                            stdout, "{}{}{}",
+                            cursor::Goto(1, 5), color::Fg(color::Rgb(225, 247, 244)),
+                            format!("{p} is not prime, pres any key to return to menu")
+                        ).map_err(|e| ClientError::Write(e))?;
+                        stdout.flush().map_err(|e| ClientError::Write(e))?;
+                    }
+                    _ => return Err(ClientError::IllegalResponse),
+                }
+                Ok(Interface::ReturnInit)
+            }
+            Interface::Log => {
+                // clear the console for displaying the results of pollards method
+                write!(
+                    stdout, "{}{}{}",
+                    cursor::Goto(1, 1), clear::All, color::Fg(color::Rgb(225, 247, 244))
+                ).map_err(|e| ClientError::Write(e))?;
+                stdout.flush().map_err(|e| ClientError::Write(e))?;
+                // display table headings
+                write!(
+                    stdout, "{:<14}|{:^14}|{:^14}|{:^14}|{:^14}|{:^14}|{:^14}|\n",
+                    "i", "x", "alpha", "beta", "y", "gamma", "delta"
+                ).map_err(|e| ClientError::Write(e))?;
+                stdout.flush().map_err(|e| ClientError::Write(e))?;
+                // keep pulling responses from the server until they are finished
+                loop {
+                    match Response::from_reader(&mut from_server)
+                        .await
+                        .map_err(|e| ClientError::Response(e))?
+
+                    {
+                        Response::LogItem { item} => {
+                            if item.xi != item.yi {
+                                write!(
+                                    stdout, "{:<14}|{:^14}|{:^14}|{:^14}|{:^14}|{:^14}|{:^14}|\n",
+                                    item.i, item.xi, item.ai, item.bi, item.yi, item.gi, item.di
+                                ).map_err(|e| ClientError::Write(e))?;
+                                stdout.flush().map_err(|e| ClientError::Write(e))?;
+                            } else {
+                                write!(
+                                    stdout, "{:<14}|{}{:^14}{}|{:^14}|{:^14}|{}{:^14}{}|{:^14}|{:^14}|\n",
+                                    item.i, color::Fg(color::Rgb(31, 207, 31)), item.xi,
+                                    color::Fg(color::Reset), item.ai, item.bi, color::Fg(color::Rgb(31, 207, 31)),
+                                    item.yi,  color::Fg(color::Reset), item.gi, item.di
+                                ).map_err(|e| ClientError::Write(e))?;
+                                stdout.flush().map_err(|e| ClientError::Write(e))?;
+                            }
+                        }
+                        Response::SuccessfulLog { log, g, h, p, ratio } => {
+                            write!(
+                                stdout, "{}{}{}\n{}\n",
+                                style::Bold, "-".repeat(98), style::Reset,
+                                format!("discrete log solved: {g}^{log} = {h} in the field F{p}, ratio of iterations to sqrt({p}) = {ratio:.10}")
+                            ).map_err(|e| ClientError::Write(e))?;
+                            stdout.flush().map_err(|e| ClientError::Write(e))?;
+                            write!(
+                                stdout, "{}", "press any key to return to menu "
+                            ).map_err(|e| ClientError::Write(e))?;
+                            stdout.flush().map_err(|e| ClientError::Write(e))?;
+                            break;
+                        }
+                        Response::UnsuccessfulLog { g, h, p} => {
+                            write!(
+                                stdout, "{}{}{}{}\n",
+                                style::Bold, "-".repeat(98), style::Reset,
+                                format!("discrete log unable to be solved for g: {g}, h: {h}, p: {p}")
+                            ).map_err(|e| ClientError::Write(e))?;
+                            stdout.flush().map_err(|e| ClientError::Write(e))?;
+                            write!(
+                                stdout, "{}", "press any key to return to menu "
+                            ).map_err(|e| ClientError::Write(e))?;
+                            stdout.flush().map_err(|e| ClientError::Write(e))?;
+                            break;
+                        }
+                    }
+                }
             }
             Interface::Home => {
                 todo!()
@@ -62,50 +150,59 @@ impl Interface {
         let mut stdout = stdout().into_raw_mode().expect("unable to convert terminal into raw mode");
         match self {
             Interface::Home => {
+                let next_state = loop {
+                    let mut buf = String::default();
+                    let _ = from_client.read_to_string(&mut buf)
+                        .map_err(|e| ClientError::Read(e))?;
+
+                    match buf.to_lowercase().as_str() {
+                        "q" => {
+                            //TODO: log client exit here
+                            break Interface::Quit;
+                        }
+                        p if !p.starts_with('-') && u64::from_str(p).is_ok() => {
+                            let p = u64::from_str(p).expect("conversion to `u64` should not fail");
+                            let frame = Frame::Prime { p };
+                            to_server.write_all(frame.as_bytes().as_slice())
+                                .await
+                                .map_err(|e| ClientError::SendRequest(e))?;
+                            break Interface::Prime;
+                        }
+                        "l" => {
+                            let base = utils::read_u64("base", &mut from_client, &mut stdout)?;
+                            let val = utils::read_u64("value", &mut from_client, &mut stdout)?;
+                            let prime = utils::read_u64("prime", &mut from_client, &mut stdout)?;
+
+                            // create frame and send to server
+                            let frame = Frame::Log { g: base, h: val, p: prime };
+                            to_server.write_all(&frame.as_bytes())
+                                .await
+                                .map_err(|e| ClientError::SendRequest(e))?;
+                            break Interface::Log;
+                        }
+                        "r" => {
+                            let modulus = utils::read_u64("modulus", &mut from_client, &mut stdout)?;
+                            let exponent = utils::read_u64("exponent", &mut from_client, &mut stdout)?;
+
+                            // create frame and send to server
+                            let frame = Frame::RSA { n: modulus, e: exponent };
+                            to_server.write_all(&frame.as_bytes())
+                                .await
+                                .map_err(|e| ClientError::SendRequest(e))?;
+                            break Interface::RSA;
+                        }
+                        _ => utils::incorrect_input_prompt("please enter a valid option", &mut stdout)?,
+                    }
+                };
+                return Ok(next_state);
+            }
+            Interface::ReturnInit => {
                 let mut buf = String::default();
-                let _ = from_client.read_to_string(&mut buf)
-                    .map_err(|e| ClientError::Read(e))?;
+                from_client.read_to_string(&mut buf)
+                    .map_err(|e| ClientError::Write(e))?;
+                return Ok(Interface::Init);
+            }
 
-                match buf.to_lowercase().as_str() {
-                    "q" => {
-                        //TODO: log client exit here
-                        return Ok(Interface::Quit);
-                    }
-                    p if !p.starts_with('-') && u64::from_str(p).is_ok() => {
-                        let p = u64::from_str(p).expect("conversion to `u64` should not fail");
-                        let frame = Frame::Prime { p };
-                        to_server.write_all(frame.as_bytes().as_slice())
-                            .await
-                            .map_err(|e| ClientError::SendRequest(e))?;
-                        return Ok(Interface::Prime);
-                    }
-                    "l" => {
-                        let base = utils::read_u64("base", &mut from_client, &mut stdout)?;
-                        let val = utils::read_u64("value", &mut from_client, &mut stdout)?;
-                        let prime = utils::read_u64("prime", &mut from_client, &mut stdout)?;
-
-                        // create frame and send to server
-                        let frame = Frame::Log { g: base, h: val, p: prime };
-                        to_server.write_all(&frame.as_bytes())
-                            .await
-                            .map_err(|e| ClientError::SendRequest(e))?;
-                        return Ok(Interface::Log);
-                    }
-                    "r" => {
-                        let modulus = utils::read_u64("modulus", &mut from_client, &mut stdout)?;
-                        let exponent = utils::read_u64("exponent", &mut from_client, &mut stdout)?;
-                        // create frame and send to server
-                        let frame = Frame::RSA { n: modulus, e: exponent };
-                        to_server.write_all(&frame.as_bytes())
-                            .await
-                            .map_err(|e| ClientError::SendRequest(e))?;
-                        return Ok(Interface::RSA);
-                    }
-                    _ => todo!()
-                }
-
-
-            },
             _ => todo!()
         }
 
@@ -129,16 +226,19 @@ mod utils {
 
             match u64::from_str(buf.trim_end_matches('\n')) {
                 Ok(v) => return Ok(v),
-                Err(e) => {
-                    write!(
-                        out, "{}{}{}{}{}",
-                        cursor::Goto(1, 4), color::Fg(color::Rgb(242, 217, 104)),
-                        clear::CurrentLine, "please enter a valid unsigned integer",
-                        color::Fg(color::Reset)
-                    ).map_err(|e| ClientError::Write(e))?;
-                    out.flush().map_err(|e| ClientError::Write(e))?;
-                }
+                Err(e) => incorrect_input_prompt("please enter a valid unsigned inter", out)?,
             }
         }
+    }
+
+    pub fn incorrect_input_prompt(prompt: &str, out: &mut RawTerminal<Stdout>) -> Result<(), ClientError> {
+        write!(
+            out, "{}{}{}{}{}",
+            cursor::Goto(1, 4), color::Fg(color::Rgb(242, 217, 104)),
+            clear::CurrentLine, prompt,
+            color::Fg(color::Reset)
+        ).map_err(|e| ClientError::Write(e))?;
+        out.flush().map_err(|e| ClientError::Write(e))?;
+        Ok(())
     }
 }

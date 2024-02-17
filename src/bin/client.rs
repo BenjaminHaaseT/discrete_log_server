@@ -7,6 +7,7 @@ pub enum ClientError {
     Write(io::Error),
     Read(io::Error),
     SendRequest(tokio_io::Error),
+    IllegalResponse,
 }
 
 fn main() {
