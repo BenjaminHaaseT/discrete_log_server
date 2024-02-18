@@ -7,6 +7,7 @@ pub use termion::{raw::{IntoRawMode, RawTerminal}, color, style, cursor, input, 
 use discrete_log_server::{Response, BytesDeser, BytesSer, AsBytes, Frame};
 use super::ClientError;
 
+#[derive(Debug)]
 pub enum Interface {
     Init,
     Home,

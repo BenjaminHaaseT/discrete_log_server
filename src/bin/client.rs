@@ -1,12 +1,16 @@
 use std::io::{self, stdin, Read};
+use std::fmt;
 use std::net::SocketAddr;
 use tokio::net::{TcpStream};
+// use tokio::task;
+use tokio::runtime;
 use tokio::io as tokio_io;
 use tokio_io::{AsyncReadExt, AsyncWriteExt};
 use crate::interface::Interface;
 
 mod interface;
 
+#[derive(Debug)]
 pub enum ClientError {
     Response(io::Error),
     Write(io::Error),
@@ -16,6 +20,22 @@ pub enum ClientError {
     InterfaceState(Interface),
     Connection(io::Error),
 }
+
+impl fmt::Display for ClientError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ClientError::Response(e) => write!(f, "{e}"),
+            ClientError::Write(e) => write!(f, "{e}"),
+            ClientError::Read(e) => write!(f, "{e}"),
+            ClientError::SendRequest(e) => write!(f, "{e}"),
+            ClientError::IllegalResponse => write!(f, "illegal response received from server"),
+            ClientError::InterfaceState(i) => write!(f, "interface entered illegal state: {i:?}"),
+            ClientError::Connection(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+
 
 struct Client;
 
@@ -50,5 +70,11 @@ impl Client {
     }
 }
 fn main() {
-    todo!()
+    let addr = ([127, 0, 0, 1], 8080).into();
+    let mut rt = runtime::Builder::new_multi_thread()
+        .build()
+        .expect("unable to build runtime");
+    if let Err(e) = rt.block_on(Client::connect(addr)) {
+        eprintln!("{e}");
+    }
 }
