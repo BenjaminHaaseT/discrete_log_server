@@ -14,7 +14,7 @@ pub enum Interface {
     Prime,
     Log,
     RSA,
-    ReturnInit
+    ReturnHome
 }
 
 impl Interface {
@@ -30,6 +30,24 @@ impl Interface {
                     .await
                     .map_err(|e| ClientError::Response(e))?;
                 assert!(response.is_connection_ok());
+                // Display home screen for client
+                write!(
+                    stdout,
+                    "{}{}{}{}{:-^80}{}{}",
+                    cursor::Goto(1, 1), cursor::Hide, clear::All, style::Bold, color::Fg(color::Rgb(92, 209, 193)), style::Reset,
+                    "Pollards-Server\n"
+                ).map_err(|e| ClientError::Write(e))?;
+                stdout.flush().map_err(|e| ClientError::Write(e))?;
+                // Display menu of options
+                write!(
+                    stdout, "{}{}{}{}{}{}\n",
+                    cursor::Goto(1, 5), color::Fg(color::Rgb(225, 247, 244)),
+                    "[q] - Quit ", "[:p:] - Check if p is prime ", "[l] - Solve discrete logarithm ", "[r] - Factor RSA public key "
+                ).map_err(|e| ClientError::Write(e))?;
+                stdout.flush().map_err(|e| ClientError::Write(e))?;
+                Ok(Interface::Home)
+            }
+            Interface::Home => {
                 // Display home screen for client
                 write!(
                     stdout,
@@ -71,7 +89,7 @@ impl Interface {
                     }
                     _ => return Err(ClientError::IllegalResponse),
                 }
-                Ok(Interface::ReturnInit)
+                Ok(Interface::ReturnHome)
             }
             Interface::Log => {
                 // clear the console for displaying the results of pollards method
@@ -85,13 +103,15 @@ impl Interface {
                     stdout, "{:<14}|{:^14}|{:^14}|{:^14}|{:^14}|{:^14}|{:^14}|\n",
                     "i", "x", "alpha", "beta", "y", "gamma", "delta"
                 ).map_err(|e| ClientError::Write(e))?;
+                write!(
+                    stdout, "{}\n", "-".repeat(105)
+                ).map_err(|e| ClientError::Write(e))?;
                 stdout.flush().map_err(|e| ClientError::Write(e))?;
                 // keep pulling responses from the server until they are finished
                 loop {
                     match Response::from_reader(&mut from_server)
                         .await
                         .map_err(|e| ClientError::Response(e))?
-
                     {
                         Response::LogItem { item} => {
                             if item.xi != item.yi {
@@ -113,7 +133,7 @@ impl Interface {
                         Response::SuccessfulLog { log, g, h, p, ratio } => {
                             write!(
                                 stdout, "{}{}{}\n{}\n",
-                                style::Bold, "-".repeat(98), style::Reset,
+                                style::Bold, "-".repeat(105), style::Reset,
                                 format!("discrete log solved: {g}^{log} = {h} in the field F{p}, ratio of iterations to sqrt({p}) = {ratio:.10}")
                             ).map_err(|e| ClientError::Write(e))?;
                             stdout.flush().map_err(|e| ClientError::Write(e))?;
@@ -126,7 +146,7 @@ impl Interface {
                         Response::UnsuccessfulLog { g, h, p} => {
                             write!(
                                 stdout, "{}{}{}{}\n",
-                                style::Bold, "-".repeat(98), style::Reset,
+                                style::Bold, "-".repeat(105), style::Reset,
                                 format!("discrete log unable to be solved for g: {g}, h: {h}, p: {p}")
                             ).map_err(|e| ClientError::Write(e))?;
                             stdout.flush().map_err(|e| ClientError::Write(e))?;
@@ -136,13 +156,71 @@ impl Interface {
                             stdout.flush().map_err(|e| ClientError::Write(e))?;
                             break;
                         }
+                        _ => return Err(ClientError::IllegalResponse),
                     }
                 }
+                Ok(Interface::ReturnHome)
             }
-            Interface::Home => {
-                todo!()
+            Interface::RSA => {
+                // clear the console for displaying the results of pollards method
+                write!(
+                    stdout, "{}{}{}",
+                    cursor::Goto(1, 1), clear::All, color::Fg(color::Rgb(225, 247, 244))
+                ).map_err(|e| ClientError::Write(e))?;
+                stdout.flush().map_err(|e| ClientError::Write(e))?;
+                // display table headings
+                write!(
+                    stdout, "{:<14}|{:^14}|{:^14}|{:^14}|\n",
+                    "i", "x", "y", "g",
+                ).map_err(|e| ClientError::Write(e))?;
+                write!(
+                    stdout, "{}\n", "-".repeat(60)
+                ).map_err(|e| ClientError::Write(e))?;
+                stdout.flush().map_err(|e| ClientError::Write(e))?;
+                loop {
+                    match Response::from_reader(&mut from_server)
+                        .await
+                        .map_err(|e| ClientError::Write(e))?
+                    {
+                        Response::RSAItem { item } => {
+                            write!(
+                                stdout, "{:<14}|{:^14}|{:^14}|{:^14}|\n",
+                                item.i, item.xi, item.yi, item.g
+                            ).map_err(|e| ClientError::Write(e))?;
+                            stdout.flush().map_err(|e| ClientError::Write(e))?;
+                        }
+                        Response::SuccessfulRSA { p, q, ratio } => {
+                            write!(
+                                stdout, "{}{}{}\n{}\n",
+                                style::Bold, "-".repeat(60), style::Reset,
+                                format!("public key factored successfully: n = {} * {}, ratio of iterations to sqrt({}) {:.10}", p, q,  p * q, ratio)
+                            ).map_err(|e| ClientError::Write(e))?;
+                            stdout.flush().map_err(|e| ClientError::Write(e))?;
+                            write!(
+                                stdout, "{}", "press any key to return to menu "
+                            ).map_err(|e| ClientError::Write(e))?;
+                            stdout.flush().map_err(|e| ClientError::Write(e))?;
+                            break;
+                        }
+                        Response::UnsuccessfulRSA { n} => {
+                            write!(
+                                stdout, "{}{}{}\n{}\n",
+                                style::Bold, "-".repeat(60), style::Reset,
+                                format!("public key {n} not able to be factored")
+                            ).map_err(|e| ClientError::Write(e))?;
+                            stdout.flush().map_err(|e| ClientError::Write(e))?;
+                            write!(
+                                stdout, "{}", "press any key to return to menu "
+                            ).map_err(|e| ClientError::Write(e))?;
+                            stdout.flush().map_err(|e| ClientError::Write(e))?;
+                            break;
+                        }
+                        _ => return Err(ClientError::IllegalResponse),
+                    }
+                }
+                Ok(Interface::ReturnHome)
             }
-            _ => todo!(),
+            s => return Err(ClientError::InterfaceState(s)),
         }
     }
 
@@ -194,19 +272,16 @@ impl Interface {
                         _ => utils::incorrect_input_prompt("please enter a valid option", &mut stdout)?,
                     }
                 };
-                return Ok(next_state);
+                Ok(next_state)
             }
-            Interface::ReturnInit => {
+            Interface::ReturnHome => {
                 let mut buf = String::default();
                 from_client.read_to_string(&mut buf)
                     .map_err(|e| ClientError::Write(e))?;
-                return Ok(Interface::Init);
+                Ok(Interface::Home)
             }
-
-            _ => todo!()
+            s => Err(ClientError::InterfaceState(s))
         }
-
-        todo!()
     }
 }
 
