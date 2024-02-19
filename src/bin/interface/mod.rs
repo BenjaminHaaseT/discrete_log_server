@@ -2,11 +2,17 @@ use std::io::{Read, Write, BufRead, stdout, Stdin, Stdout};
 use std::time::Duration;
 use std::str::FromStr;
 use tokio::io::{AsyncWrite, AsyncWriteExt, AsyncRead, AsyncReadExt};
+use tracing::{error, info, debug, instrument};
 pub use termion::{raw::{IntoRawMode, RawTerminal}, color, style, cursor, input, clear};
 
 use discrete_log_server::{Response, BytesDeser, BytesSer, AsBytes, Frame};
 use super::ClientError;
 
+/// The interface for client interactions with the server
+///
+/// This struct will manage the parsing of requests from client input, sending requests to the server,
+/// and receiving responses from the server as well. The `Interface` type is a state machine, that will
+/// change state based on input received from the client as well as responses received from the server.
 #[derive(Debug)]
 pub enum Interface {
     Init,
@@ -23,14 +29,18 @@ impl Interface {
         Interface::Init
     }
 
+    /// Transitions the state of the Interface based on the response received from the server.
+    #[instrument(ret, err, skip_all)]
     pub async fn receive_response<R: AsyncReadExt + Unpin>(self, mut from_server: R) -> Result<Self, ClientError> {
         let mut stdout = stdout().into_raw_mode().expect("stdout unable to be converted into raw mode");
         match self {
             Interface::Init => {
+                debug!(interface = ?self, "interface is in `Init` state");
                 let response = Response::from_reader(&mut from_server)
                     .await
                     .map_err(|e| ClientError::Response(e))?;
                 assert!(response.is_connection_ok());
+                info!("successfully connected to server");
                 // Display home screen for client
                 write!(
                     stdout,
@@ -49,6 +59,7 @@ impl Interface {
                 Ok(Interface::Home)
             }
             Interface::Home => {
+                debug!(interface = ?self, "interface is in `Home` state");
                 // Display home screen for client
                 write!(
                     stdout,
@@ -67,6 +78,7 @@ impl Interface {
                 Ok(Interface::Home)
             }
             Interface::Prime => {
+                debug!(interface = ?self, "interface is in `Prime` state");
                 // match on the response returned from the server
                 match Response::from_reader(&mut from_server)
                     .await
@@ -93,6 +105,7 @@ impl Interface {
                 Ok(Interface::ReturnHome)
             }
             Interface::Log => {
+                debug!(interface = ?self, "interface is in `Log` state");
                 // clear the console for displaying the results of pollards method
                 write!(
                     stdout, "{}{}{}",
@@ -163,6 +176,7 @@ impl Interface {
                 Ok(Interface::ReturnHome)
             }
             Interface::RSA => {
+                debug!(interface = ?self, "interface is in `RSA` state");
                 // clear the console for displaying the results of pollards method
                 write!(
                     stdout, "{}{}{}",
@@ -225,10 +239,13 @@ impl Interface {
         }
     }
 
+    /// Transitions the state of the interface based on the input of the client
+    #[instrument(ret, err, skip_all)]
     pub async fn parse_request<W: AsyncWriteExt + Unpin, C: Read>(self, mut to_server: W, mut from_client: C) -> Result<Self, ClientError> {
         let mut stdout = stdout().into_raw_mode().expect("unable to convert terminal into raw mode");
         match self {
             Interface::Home => {
+                debug!(interface = ?self, "interface is in `Home` state");
                 let next_state = loop {
                     let mut buf = String::default();
                     let _ = from_client.read_to_string(&mut buf)
@@ -236,7 +253,7 @@ impl Interface {
 
                     match buf.to_lowercase().as_str() {
                         "q" => {
-                            //TODO: log client exit here
+                            info!("client exiting");
                             break Interface::Quit;
                         }
                         p if !p.starts_with('-') && u64::from_str(p).is_ok() => {
@@ -276,6 +293,7 @@ impl Interface {
                 Ok(next_state)
             }
             Interface::ReturnHome => {
+                debug!(interface = ?self, "interface is in `ReturnHome` state");
                 let mut buf = String::default();
                 from_client.read_to_string(&mut buf)
                     .map_err(|e| ClientError::Write(e))?;

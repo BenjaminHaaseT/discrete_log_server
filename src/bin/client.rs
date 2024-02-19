@@ -6,6 +6,7 @@ use tokio::net::{TcpStream};
 use tokio::runtime;
 use tokio::io as tokio_io;
 use tokio_io::{AsyncReadExt, AsyncWriteExt};
+use tracing::instrument;
 use crate::interface::Interface;
 
 mod interface;
@@ -35,11 +36,13 @@ impl fmt::Display for ClientError {
     }
 }
 
-
-
+/// A struct for connecting to the server
 struct Client;
 
 impl Client {
+
+    /// Connects to the server at the address given by `addr`.
+    #[instrument(ret, err)]
     async fn connect(addr: SocketAddr) -> Result<(), ClientError> {
         // create interface
         let mut interface = Interface::new();
