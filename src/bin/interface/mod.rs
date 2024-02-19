@@ -3,7 +3,7 @@ use std::time::Duration;
 use std::str::FromStr;
 use tokio::io::{AsyncWrite, AsyncWriteExt, AsyncRead, AsyncReadExt};
 use tracing::{error, info, debug, instrument};
-pub use termion::{raw::{IntoRawMode, RawTerminal}, color, style, cursor, input, clear};
+pub use termion::{raw::{IntoRawMode, RawTerminal}, color, style, cursor, input::TermRead, event::Key, clear};
 
 use discrete_log_server::{Response, BytesDeser, BytesSer, AsBytes, Frame};
 use super::ClientError;
@@ -247,9 +247,10 @@ impl Interface {
             Interface::Home => {
                 debug!(interface = ?self, "interface is in `Home` state");
                 let next_state = loop {
-                    let mut buf = String::default();
-                    let _ = from_client.read_to_string(&mut buf)
-                        .map_err(|e| ClientError::Read(e))?;
+                    // let mut buf = String::default();
+                    // let _ = from_client.read_to_string(&mut buf)
+                    //     .map_err(|e| ClientError::Read(e))?;
+                    let buf = utils::read_client_input(&mut stdout, 5, 1)?;
 
                     match buf.to_lowercase().as_str() {
                         "q" => {
@@ -306,17 +307,20 @@ impl Interface {
 
 mod utils {
     use super::*;
+    use std::io::{stdin, Read};
     pub fn read_u64<'a, C: Read>(label: &'a str, from_client: &mut C, out: &mut RawTerminal<Stdout>) -> Result<u64, ClientError> {
+        let prompt = format!("enter {}: ", label);
         loop {
             write!(
                 out, "{}{}{}",
-                cursor::Goto(1, 5), clear::CurrentLine, format!("enter {}: ", label),
+                cursor::Goto(1, 5), clear::CurrentLine, prompt,
             ).map_err(|e| ClientError::Write(e))?;
             out.flush().map_err(|e| ClientError::Write(e))?;
 
-            let mut buf = String::default();
-            from_client.read_to_string(&mut buf)
-                .map_err(|e| ClientError::Read(e))?;
+            // let mut buf = String::default();
+            // from_client.read_to_string(&mut buf)
+            //     .map_err(|e| ClientError::Read(e))?;
+            let buf = read_client_input(out, 5, prompt.len() as u16)?;
 
             match u64::from_str(buf.trim_end_matches('\n')) {
                 Ok(v) => return Ok(v),
@@ -334,5 +338,35 @@ mod utils {
         ).map_err(|e| ClientError::Write(e))?;
         out.flush().map_err(|e| ClientError::Write(e))?;
         Ok(())
+    }
+
+    pub fn read_client_input(out: &mut RawTerminal<Stdout>, row: u16, col: u16) -> Result<String, ClientError> {
+        let mut keys = stdin().keys();
+        let mut buf = String::default();
+
+        loop {
+            match keys.next() {
+                Some(Ok(Key::Char('\n'))) => break,
+                Some(Ok(Key::Backspace)) => {
+                    if let Some(_) = buf.pop() {
+                        write!(
+                            out, "{}{}", cursor::Left(1), clear::AfterCursor
+                        ).map_err(|e| ClientError::Write(e))?;
+                        out.flush().map_err(|e| ClientError::Write(e))?;
+                    }
+                }
+                Some(Ok(Key::Char(c))) => {
+                    write!(
+                        out, "{}{}", cursor::Goto(col + buf.len() as u16, row), c
+                    ).map_err(|e| ClientError::Write(e))?;
+                    out.flush().map_err(|e| ClientError::Write(e))?;
+                    buf.push(c);
+                }
+                Some(Err(e)) => return Err(ClientError::Write(e)),
+                _ => {}
+            }
+        }
+
+        Ok(buf)
     }
 }
