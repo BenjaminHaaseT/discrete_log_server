@@ -250,7 +250,7 @@ impl Interface {
                     // let mut buf = String::default();
                     // let _ = from_client.read_to_string(&mut buf)
                     //     .map_err(|e| ClientError::Read(e))?;
-                    let buf = utils::read_client_input(&mut stdout, 5, 1)?;
+                    let buf = utils::read_client_input(&mut stdout, 6, 1)?;
 
                     match buf.to_lowercase().as_str() {
                         "q" => {
