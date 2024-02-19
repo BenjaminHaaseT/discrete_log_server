@@ -75,6 +75,7 @@ impl Client {
 fn main() {
     let addr = ([127, 0, 0, 1], 8080).into();
     let mut rt = runtime::Builder::new_multi_thread()
+        .enable_all()
         .build()
         .expect("unable to build runtime");
     if let Err(e) = rt.block_on(Client::connect(addr)) {

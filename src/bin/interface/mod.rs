@@ -44,9 +44,9 @@ impl Interface {
                 // Display home screen for client
                 write!(
                     stdout,
-                    "{}{}{}{}{:-^80}{}{}",
-                    cursor::Goto(1, 1), cursor::Hide, clear::All, style::Bold, color::Fg(color::Rgb(92, 209, 193)), style::Reset,
-                    "Pollards-Server\n"
+                    "{}{}{}{}{}{:-^80}{}\n",
+                    cursor::Goto(1, 1), cursor::Hide, clear::All, style::Bold, color::Fg(color::Rgb(92, 209, 193)), "Pollards-Server", style::Reset,
+
                 ).map_err(|e| ClientError::Write(e))?;
                 stdout.flush().map_err(|e| ClientError::Write(e))?;
                 // Display menu of options
