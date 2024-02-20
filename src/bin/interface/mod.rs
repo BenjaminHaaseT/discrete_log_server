@@ -44,14 +44,14 @@ impl Interface {
                 // Display home screen for client
                 write!(
                     stdout,
-                    "{}{}{}{}{}{:-^80}{}\n",
-                    cursor::Goto(1, 1), cursor::Hide, clear::All, style::Bold, color::Fg(color::Rgb(92, 209, 193)), "Pollards-Server", style::Reset,
+                    "{}{}{}{}{}{}{:-^80}{}",
+                    cursor::Goto(1, 1), cursor::Hide, clear::BeforeCursor, clear::AfterCursor, style::Bold, color::Fg(color::Rgb(92, 209, 193)), "Pollards-Server", style::Reset,
 
                 ).map_err(|e| ClientError::Write(e))?;
                 stdout.flush().map_err(|e| ClientError::Write(e))?;
                 // Display menu of options
                 write!(
-                    stdout, "{}{}{}{}{}{}\n",
+                    stdout, "{}{}{}{}{}{}",
                     cursor::Goto(1, 5), color::Fg(color::Rgb(225, 247, 244)),
                     "[q] - Quit ", "[:p:] - Check if p is prime ", "[l] - Solve discrete logarithm ", "[r] - Factor RSA public key "
                 ).map_err(|e| ClientError::Write(e))?;
@@ -63,14 +63,14 @@ impl Interface {
                 // Display home screen for client
                 write!(
                     stdout,
-                    "{}{}{}{}{:-^80}{}{}",
-                    cursor::Goto(1, 1), cursor::Hide, clear::All, style::Bold, color::Fg(color::Rgb(92, 209, 193)), style::Reset,
-                    "Pollards-Server\n"
+                    "{}{}{}{}{}{}{:-^80}{}{}",
+                    cursor::Goto(1, 1), cursor::Hide, clear::BeforeCursor, clear::AfterCursor, style::Bold, color::Fg(color::Rgb(92, 209, 193)),
+                    "Pollards-Server", style::Reset, color::Fg(color::Reset)
                 ).map_err(|e| ClientError::Write(e))?;
                 stdout.flush().map_err(|e| ClientError::Write(e))?;
                 // Display menu of options
                 write!(
-                    stdout, "{}{}{}{}{}{}\n",
+                    stdout, "{}{}{}{}{}{}",
                     cursor::Goto(1, 5), color::Fg(color::Rgb(225, 247, 244)),
                     "[q] - Quit ", "[:p:] - Check if p is prime ", "[l] - Solve discrete logarithm ", "[r] - Factor RSA public key "
                 ).map_err(|e| ClientError::Write(e))?;
@@ -86,17 +86,17 @@ impl Interface {
                 {
                     Response::Prime { p, prob } => {
                         write!(
-                            stdout, "{}{}{}",
-                            cursor::Goto(1, 5), color::Fg(color::Rgb(225, 247, 244)),
-                            format!("{p} is prime with probability {prob:.10}, press any key to return to menu")
+                            stdout, "{}{}{}{}",
+                            cursor::Goto(1, 5), clear::CurrentLine, color::Fg(color::Rgb(225, 247, 244)),
+                            format!("{p} is prime with probability {prob:.10}, press enter to return to menu")
                         ).map_err(|e| ClientError::Write(e))?;
                         stdout.flush().map_err(|e| ClientError::Write(e))?;
                     }
                     Response::NotPrime { p} => {
                         write!(
-                            stdout, "{}{}{}",
-                            cursor::Goto(1, 5), color::Fg(color::Rgb(225, 247, 244)),
-                            format!("{p} is not prime, pres any key to return to menu")
+                            stdout, "{}{}{}{}",
+                            cursor::Goto(1, 5), clear::CurrentLine, color::Fg(color::Rgb(225, 247, 244)),
+                            format!("{p} is not prime, press enter to return to menu")
                         ).map_err(|e| ClientError::Write(e))?;
                         stdout.flush().map_err(|e| ClientError::Write(e))?;
                     }
@@ -108,19 +108,21 @@ impl Interface {
                 debug!(interface = ?self, "interface is in `Log` state");
                 // clear the console for displaying the results of pollards method
                 write!(
-                    stdout, "{}{}{}",
-                    cursor::Goto(1, 1), clear::All, color::Fg(color::Rgb(225, 247, 244))
+                    stdout, "{}{}{}{}",
+                    cursor::Goto(1, 1), clear::BeforeCursor, clear::AfterCursor, color::Fg(color::Rgb(225, 247, 244))
                 ).map_err(|e| ClientError::Write(e))?;
                 stdout.flush().map_err(|e| ClientError::Write(e))?;
                 // display table headings
                 write!(
-                    stdout, "{:<14}|{:^14}|{:^14}|{:^14}|{:^14}|{:^14}|{:^14}|\n",
+                    stdout, "{:<11}|{:^11}|{:^11}|{:^11}|{:^11}|{:^11}|{:^11}|\n",
                     "i", "x", "alpha", "beta", "y", "gamma", "delta"
                 ).map_err(|e| ClientError::Write(e))?;
+                stdout.flush().map_err(|e| ClientError::Write(e))?;
                 write!(
-                    stdout, "{}\n", "-".repeat(105)
+                    stdout, "{}{}\n", cursor::Goto(1, 2), "-".repeat(84)
                 ).map_err(|e| ClientError::Write(e))?;
                 stdout.flush().map_err(|e| ClientError::Write(e))?;
+                let mut row = 3;
                 // keep pulling responses from the server until they are finished
                 loop {
                     match Response::from_reader(&mut from_server)
@@ -130,42 +132,51 @@ impl Interface {
                         Response::LogItem { item} => {
                             if item.xi != item.yi {
                                 write!(
-                                    stdout, "{:<14}|{:^14}|{:^14}|{:^14}|{:^14}|{:^14}|{:^14}|\n",
-                                    item.i, item.xi, item.ai, item.bi, item.yi, item.gi, item.di
+                                    stdout, "{}{:<11}|{:^11}|{:^11}|{:^11}|{:^11}|{:^11}|{:^11}|\n",
+                                    cursor::Goto(1, row), item.i, item.xi, item.ai, item.bi, item.yi, item.gi, item.di
                                 ).map_err(|e| ClientError::Write(e))?;
                                 stdout.flush().map_err(|e| ClientError::Write(e))?;
                             } else {
                                 write!(
-                                    stdout, "{:<14}|{}{:^14}{}|{:^14}|{:^14}|{}{:^14}{}|{:^14}|{:^14}|\n",
-                                    item.i, color::Fg(color::Rgb(31, 207, 31)), item.xi,
-                                    color::Fg(color::Reset), item.ai, item.bi, color::Fg(color::Rgb(31, 207, 31)),
-                                    item.yi,  color::Fg(color::Reset), item.gi, item.di
+                                    stdout, "{}{:<11}|{}{:^11}{}|{:^11}|{:^11}|{}{:^11}{}|{:^11}|{:^11}|\n",
+                                    cursor::Goto(1, row), item.i, color::Fg(color::Rgb(31, 207, 31)), item.xi,
+                                    color::Fg(color::Rgb(225, 247, 244)), item.ai, item.bi, color::Fg(color::Rgb(31, 207, 31)),
+                                    item.yi,  color::Fg(color::Rgb(225, 247, 244)), item.gi, item.di
                                 ).map_err(|e| ClientError::Write(e))?;
                                 stdout.flush().map_err(|e| ClientError::Write(e))?;
                             }
+                            row += 1;
                         }
                         Response::SuccessfulLog { log, g, h, p, ratio } => {
                             write!(
-                                stdout, "{}{}{}\n{}\n",
-                                style::Bold, "-".repeat(105), style::Reset,
+                                stdout, "{}{}{}{}\n",
+                                cursor::Goto(1, row), style::Bold, "-".repeat(84), style::Reset,
+                                // cursor::Goto(1, row + 1),
+                                // format!("discrete log solved: {g}^{log} = {h} in the field F{p}, ratio of iterations to sqrt({p}) = {ratio:.10}")
+                            ).map_err(|e| ClientError::Write(e))?;
+                            stdout.flush().map_err(|e| ClientError::Write(e))?;
+                            write!(
+                                stdout, "{}{}{}\n",
+                                cursor::Goto(1, row + 1), color::Fg(color::Rgb(225, 247, 244)),
                                 format!("discrete log solved: {g}^{log} = {h} in the field F{p}, ratio of iterations to sqrt({p}) = {ratio:.10}")
                             ).map_err(|e| ClientError::Write(e))?;
                             stdout.flush().map_err(|e| ClientError::Write(e))?;
                             write!(
-                                stdout, "{}", "press any key to return to menu "
+                                stdout, "{}{}", cursor::Goto(1, row + 2), "press enter to return to menu "
                             ).map_err(|e| ClientError::Write(e))?;
                             stdout.flush().map_err(|e| ClientError::Write(e))?;
                             break;
                         }
                         Response::UnsuccessfulLog { g, h, p} => {
                             write!(
-                                stdout, "{}{}{}{}\n",
-                                style::Bold, "-".repeat(105), style::Reset,
+                                stdout, "{}{}{}{}\n{}{}\n",
+                                cursor::Goto(1, row), style::Bold, "-".repeat(84), style::NoBold,
+                                cursor::Goto(1, row + 1),
                                 format!("discrete log unable to be solved for g: {g}, h: {h}, p: {p}")
                             ).map_err(|e| ClientError::Write(e))?;
                             stdout.flush().map_err(|e| ClientError::Write(e))?;
                             write!(
-                                stdout, "{}", "press any key to return to menu "
+                                stdout, "{}", "press enter to return to menu "
                             ).map_err(|e| ClientError::Write(e))?;
                             stdout.flush().map_err(|e| ClientError::Write(e))?;
                             break;
@@ -295,9 +306,7 @@ impl Interface {
             }
             Interface::ReturnHome => {
                 debug!(interface = ?self, "interface is in `ReturnHome` state");
-                let mut buf = String::default();
-                from_client.read_to_string(&mut buf)
-                    .map_err(|e| ClientError::Write(e))?;
+                let _ = utils::read_client_input(&mut stdout, 6, 1)?;
                 Ok(Interface::Home)
             }
             s => Err(ClientError::InterfaceState(s))
@@ -346,7 +355,13 @@ mod utils {
 
         loop {
             match keys.next() {
-                Some(Ok(Key::Char('\n'))) => break,
+                Some(Ok(Key::Char('\n'))) => {
+                    write!(
+                        out, "{}{}", cursor::Goto(1, row), clear::CurrentLine
+                    ).map_err(|e| ClientError::Write(e))?;
+                    out.flush().map_err(|e| ClientError::Write(e))?;
+                    break;
+                },
                 Some(Ok(Key::Backspace)) => {
                     if let Some(_) = buf.pop() {
                         write!(
@@ -366,6 +381,7 @@ mod utils {
                 _ => {}
             }
         }
+
 
         Ok(buf)
     }

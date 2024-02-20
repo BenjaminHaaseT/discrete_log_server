@@ -72,6 +72,7 @@ impl Client {
         Ok(())
     }
 }
+
 fn main() {
     let addr = ([127, 0, 0, 1], 8080).into();
     let mut rt = runtime::Builder::new_multi_thread()
