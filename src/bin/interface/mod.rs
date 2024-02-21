@@ -3,7 +3,7 @@ use std::time::Duration;
 use std::str::FromStr;
 use tokio::io::{AsyncWrite, AsyncWriteExt, AsyncRead, AsyncReadExt};
 use tracing::{error, info, debug, instrument};
-pub use termion::{raw::{IntoRawMode, RawTerminal}, color, style, cursor, input::TermRead, event::Key, clear};
+pub use termion::{raw::{IntoRawMode, RawTerminal}, color, screen::{AlternateScreen, IntoAlternateScreen}, style, cursor, input::TermRead, event::Key, clear};
 
 use discrete_log_server::{Response, BytesDeser, BytesSer, AsBytes, Frame};
 use super::ClientError;
@@ -13,7 +13,6 @@ use super::ClientError;
 /// This struct will manage the parsing of requests from client input, sending requests to the server,
 /// and receiving responses from the server as well. The `Interface` type is a state machine, that will
 /// change state based on input received from the client as well as responses received from the server.
-#[derive(Debug)]
 pub enum Interface {
     Init,
     Home,
@@ -21,7 +20,7 @@ pub enum Interface {
     Prime,
     Log,
     RSA,
-    ReturnHome
+    ReturnHome { row: u16, alt_screen: Option<AlternateScreen<Stdout>> }
 }
 
 impl Interface {
@@ -30,12 +29,11 @@ impl Interface {
     }
 
     /// Transitions the state of the Interface based on the response received from the server.
-    #[instrument(ret, err, skip_all)]
     pub async fn receive_response<R: AsyncReadExt + Unpin>(self, mut from_server: R) -> Result<Self, ClientError> {
-        let mut stdout = stdout().into_raw_mode().expect("stdout unable to be converted into raw mode");
+        let mut out = stdout().into_raw_mode().expect("stdout unable to be converted into raw mode");
         match self {
             Interface::Init => {
-                debug!(interface = ?self, "interface is in `Init` state");
+                debug!("interface is in `Init` state");
                 let response = Response::from_reader(&mut from_server)
                     .await
                     .map_err(|e| ClientError::Response(e))?;
@@ -43,42 +41,42 @@ impl Interface {
                 info!("successfully connected to server");
                 // Display home screen for client
                 write!(
-                    stdout,
+                    out,
                     "{}{}{}{}{}{}{:-^80}{}",
                     cursor::Goto(1, 1), cursor::Hide, clear::BeforeCursor, clear::AfterCursor, style::Bold, color::Fg(color::Rgb(92, 209, 193)), "Pollards-Server", style::Reset,
-
                 ).map_err(|e| ClientError::Write(e))?;
-                stdout.flush().map_err(|e| ClientError::Write(e))?;
+                out.flush().map_err(|e| ClientError::Write(e))?;
+
                 // Display menu of options
                 write!(
-                    stdout, "{}{}{}{}{}{}",
+                    out, "{}{}{}{}{}{}",
                     cursor::Goto(1, 5), color::Fg(color::Rgb(225, 247, 244)),
                     "[q] - Quit ", "[:p:] - Check if p is prime ", "[l] - Solve discrete logarithm ", "[r] - Factor RSA public key "
                 ).map_err(|e| ClientError::Write(e))?;
-                stdout.flush().map_err(|e| ClientError::Write(e))?;
+                out.flush().map_err(|e| ClientError::Write(e))?;
                 Ok(Interface::Home)
             }
             Interface::Home => {
-                debug!(interface = ?self, "interface is in `Home` state");
+                debug!("interface is in `Home` state");
                 // Display home screen for client
                 write!(
-                    stdout,
+                    out,
                     "{}{}{}{}{}{}{:-^80}{}{}",
                     cursor::Goto(1, 1), cursor::Hide, clear::BeforeCursor, clear::AfterCursor, style::Bold, color::Fg(color::Rgb(92, 209, 193)),
                     "Pollards-Server", style::Reset, color::Fg(color::Reset)
                 ).map_err(|e| ClientError::Write(e))?;
-                stdout.flush().map_err(|e| ClientError::Write(e))?;
+                out.flush().map_err(|e| ClientError::Write(e))?;
                 // Display menu of options
                 write!(
-                    stdout, "{}{}{}{}{}{}",
+                    out, "{}{}{}{}{}{}",
                     cursor::Goto(1, 5), color::Fg(color::Rgb(225, 247, 244)),
                     "[q] - Quit ", "[:p:] - Check if p is prime ", "[l] - Solve discrete logarithm ", "[r] - Factor RSA public key "
                 ).map_err(|e| ClientError::Write(e))?;
-                stdout.flush().map_err(|e| ClientError::Write(e))?;
+                out.flush().map_err(|e| ClientError::Write(e))?;
                 Ok(Interface::Home)
             }
             Interface::Prime => {
-                debug!(interface = ?self, "interface is in `Prime` state");
+                debug!("interface is in `Prime` state");
                 // match on the response returned from the server
                 match Response::from_reader(&mut from_server)
                     .await
@@ -86,43 +84,54 @@ impl Interface {
                 {
                     Response::Prime { p, prob } => {
                         write!(
-                            stdout, "{}{}{}{}",
+                            out, "{}{}{}{}",
                             cursor::Goto(1, 5), clear::CurrentLine, color::Fg(color::Rgb(225, 247, 244)),
                             format!("{p} is prime with probability {prob:.10}, press enter to return to menu")
                         ).map_err(|e| ClientError::Write(e))?;
-                        stdout.flush().map_err(|e| ClientError::Write(e))?;
+                        out.flush().map_err(|e| ClientError::Write(e))?;
                     }
                     Response::NotPrime { p} => {
                         write!(
-                            stdout, "{}{}{}{}",
+                            out, "{}{}{}{}",
                             cursor::Goto(1, 5), clear::CurrentLine, color::Fg(color::Rgb(225, 247, 244)),
                             format!("{p} is not prime, press enter to return to menu")
                         ).map_err(|e| ClientError::Write(e))?;
-                        stdout.flush().map_err(|e| ClientError::Write(e))?;
+                        out.flush().map_err(|e| ClientError::Write(e))?;
                     }
                     _ => return Err(ClientError::IllegalResponse),
                 }
-                Ok(Interface::ReturnHome)
+                Ok(Interface::ReturnHome { row: 6, alt_screen: None })
             }
             Interface::Log => {
-                debug!(interface = ?self, "interface is in `Log` state");
+                // For writing to a new screen, that way we don't pollute the main screen when output
+                // becomes long
+                let mut alt_out = stdout()
+                    .into_alternate_screen()
+                    .map_err(|e| ClientError::Write(e))?;
+                debug!("interface is in `Log` state");
+
                 // clear the console for displaying the results of pollards method
                 write!(
-                    stdout, "{}{}{}{}",
+                    alt_out, "{}{}{}{}",
                     cursor::Goto(1, 1), clear::BeforeCursor, clear::AfterCursor, color::Fg(color::Rgb(225, 247, 244))
                 ).map_err(|e| ClientError::Write(e))?;
-                stdout.flush().map_err(|e| ClientError::Write(e))?;
+                alt_out.flush().map_err(|e| ClientError::Write(e))?;
+
                 // display table headings
                 write!(
-                    stdout, "{:<11}|{:^11}|{:^11}|{:^11}|{:^11}|{:^11}|{:^11}|\n",
+                    alt_out, "{:<11}|{:^11}|{:^11}|{:^11}|{:^11}|{:^11}|{:^11}|\n",
                     "i", "x", "alpha", "beta", "y", "gamma", "delta"
                 ).map_err(|e| ClientError::Write(e))?;
-                stdout.flush().map_err(|e| ClientError::Write(e))?;
+                alt_out.flush().map_err(|e| ClientError::Write(e))?;
+
                 write!(
-                    stdout, "{}{}\n", cursor::Goto(1, 2), "-".repeat(84)
+                    alt_out, "{}{}\n", cursor::Goto(1, 2), "-".repeat(84)
                 ).map_err(|e| ClientError::Write(e))?;
-                stdout.flush().map_err(|e| ClientError::Write(e))?;
+                alt_out.flush().map_err(|e| ClientError::Write(e))?;
+
+                // Keep track of what row we are on
                 let mut row = 3;
+
                 // keep pulling responses from the server until they are finished
                 loop {
                     match Response::from_reader(&mut from_server)
@@ -132,77 +141,83 @@ impl Interface {
                         Response::LogItem { item} => {
                             if item.xi != item.yi {
                                 write!(
-                                    stdout, "{}{:<11}|{:^11}|{:^11}|{:^11}|{:^11}|{:^11}|{:^11}|\n",
+                                    alt_out, "{}{:<11}|{:^11}|{:^11}|{:^11}|{:^11}|{:^11}|{:^11}|\n",
                                     cursor::Goto(1, row), item.i, item.xi, item.ai, item.bi, item.yi, item.gi, item.di
                                 ).map_err(|e| ClientError::Write(e))?;
-                                stdout.flush().map_err(|e| ClientError::Write(e))?;
+                                alt_out.flush().map_err(|e| ClientError::Write(e))?;
                             } else {
                                 write!(
-                                    stdout, "{}{:<11}|{}{:^11}{}|{:^11}|{:^11}|{}{:^11}{}|{:^11}|{:^11}|\n",
+                                    alt_out, "{}{:<11}|{}{:^11}{}|{:^11}|{:^11}|{}{:^11}{}|{:^11}|{:^11}|\n",
                                     cursor::Goto(1, row), item.i, color::Fg(color::Rgb(31, 207, 31)), item.xi,
                                     color::Fg(color::Rgb(225, 247, 244)), item.ai, item.bi, color::Fg(color::Rgb(31, 207, 31)),
                                     item.yi,  color::Fg(color::Rgb(225, 247, 244)), item.gi, item.di
                                 ).map_err(|e| ClientError::Write(e))?;
-                                stdout.flush().map_err(|e| ClientError::Write(e))?;
+                                alt_out.flush().map_err(|e| ClientError::Write(e))?;
                             }
                             row += 1;
                         }
                         Response::SuccessfulLog { log, g, h, p, ratio } => {
                             write!(
-                                stdout, "{}{}{}{}\n",
+                                alt_out, "{}{}{}{}\n",
                                 cursor::Goto(1, row), style::Bold, "-".repeat(84), style::Reset,
                                 // cursor::Goto(1, row + 1),
                                 // format!("discrete log solved: {g}^{log} = {h} in the field F{p}, ratio of iterations to sqrt({p}) = {ratio:.10}")
                             ).map_err(|e| ClientError::Write(e))?;
-                            stdout.flush().map_err(|e| ClientError::Write(e))?;
+                            alt_out.flush().map_err(|e| ClientError::Write(e))?;
                             write!(
-                                stdout, "{}{}{}\n",
+                                alt_out, "{}{}{}\n",
                                 cursor::Goto(1, row + 1), color::Fg(color::Rgb(225, 247, 244)),
                                 format!("discrete log solved: {g}^{log} = {h} in the field F{p}, ratio of iterations to sqrt({p}) = {ratio:.10}")
                             ).map_err(|e| ClientError::Write(e))?;
-                            stdout.flush().map_err(|e| ClientError::Write(e))?;
+                            alt_out.flush().map_err(|e| ClientError::Write(e))?;
                             write!(
-                                stdout, "{}{}", cursor::Goto(1, row + 2), "press enter to return to menu "
+                                alt_out, "{}{}", cursor::Goto(1, row + 2), "press enter to return to menu "
                             ).map_err(|e| ClientError::Write(e))?;
-                            stdout.flush().map_err(|e| ClientError::Write(e))?;
+                            alt_out.flush().map_err(|e| ClientError::Write(e))?;
                             break;
                         }
                         Response::UnsuccessfulLog { g, h, p} => {
                             write!(
-                                stdout, "{}{}{}{}\n{}{}\n",
+                                alt_out, "{}{}{}{}\n{}{}\n",
                                 cursor::Goto(1, row), style::Bold, "-".repeat(84), style::NoBold,
                                 cursor::Goto(1, row + 1),
                                 format!("discrete log unable to be solved for g: {g}, h: {h}, p: {p}")
                             ).map_err(|e| ClientError::Write(e))?;
-                            stdout.flush().map_err(|e| ClientError::Write(e))?;
+                            alt_out.flush().map_err(|e| ClientError::Write(e))?;
                             write!(
-                                stdout, "{}", "press enter to return to menu "
+                                alt_out, "{}", "press enter to return to menu "
                             ).map_err(|e| ClientError::Write(e))?;
-                            stdout.flush().map_err(|e| ClientError::Write(e))?;
+                            alt_out.flush().map_err(|e| ClientError::Write(e))?;
                             break;
                         }
                         _ => return Err(ClientError::IllegalResponse),
                     }
                 }
-                Ok(Interface::ReturnHome)
+                Ok(Interface::ReturnHome { row: row + 3, alt_screen: Some(alt_out) })
             }
             Interface::RSA => {
-                debug!(interface = ?self, "interface is in `RSA` state");
+                let mut alt_out = stdout().into_alternate_screen()
+                    .map_err(|e| ClientError::Write(e))?;
+
+                debug!("interface is in `RSA` state");
+
                 // clear the console for displaying the results of pollards method
                 write!(
-                    stdout, "{}{}{}",
+                    alt_out, "{}{}{}",
                     cursor::Goto(1, 1), clear::All, color::Fg(color::Rgb(225, 247, 244))
                 ).map_err(|e| ClientError::Write(e))?;
-                stdout.flush().map_err(|e| ClientError::Write(e))?;
+                alt_out.flush().map_err(|e| ClientError::Write(e))?;
+
                 // display table headings
                 write!(
-                    stdout, "{:<14}|{:^14}|{:^14}|{:^14}|\n",
+                    alt_out, "{:<14}|{:^14}|{:^14}|{:^14}|\n",
                     "i", "x", "y", "g",
                 ).map_err(|e| ClientError::Write(e))?;
                 write!(
-                    stdout, "{}\n", "-".repeat(60)
+                    alt_out, "{}\n", "-".repeat(60)
                 ).map_err(|e| ClientError::Write(e))?;
-                stdout.flush().map_err(|e| ClientError::Write(e))?;
+                alt_out.flush().map_err(|e| ClientError::Write(e))?;
+
                 loop {
                     match Response::from_reader(&mut from_server)
                         .await
@@ -210,53 +225,56 @@ impl Interface {
                     {
                         Response::RSAItem { item } => {
                             write!(
-                                stdout, "{:<14}|{:^14}|{:^14}|{:^14}|\n",
+                                alt_out, "{:<14}|{:^14}|{:^14}|{:^14}|\n",
                                 item.i, item.xi, item.yi, item.g
                             ).map_err(|e| ClientError::Write(e))?;
-                            stdout.flush().map_err(|e| ClientError::Write(e))?;
+                            alt_out.flush().map_err(|e| ClientError::Write(e))?;
                         }
                         Response::SuccessfulRSA { p, q, ratio } => {
                             write!(
-                                stdout, "{}{}{}\n{}\n",
+                                alt_out, "{}{}{}\n{}\n",
                                 style::Bold, "-".repeat(60), style::Reset,
                                 format!("public key factored successfully: n = {} * {}, ratio of iterations to sqrt({}) {:.10}", p, q,  p * q, ratio)
                             ).map_err(|e| ClientError::Write(e))?;
-                            stdout.flush().map_err(|e| ClientError::Write(e))?;
+                            alt_out.flush().map_err(|e| ClientError::Write(e))?;
+
                             write!(
-                                stdout, "{}", "press any key to return to menu "
+                                alt_out, "{}", "press any key to return to menu "
                             ).map_err(|e| ClientError::Write(e))?;
-                            stdout.flush().map_err(|e| ClientError::Write(e))?;
+
+                            alt_out.flush().map_err(|e| ClientError::Write(e))?;
                             break;
                         }
                         Response::UnsuccessfulRSA { n} => {
                             write!(
-                                stdout, "{}{}{}\n{}\n",
+                                alt_out, "{}{}{}\n{}\n",
                                 style::Bold, "-".repeat(60), style::Reset,
                                 format!("public key {n} not able to be factored")
                             ).map_err(|e| ClientError::Write(e))?;
-                            stdout.flush().map_err(|e| ClientError::Write(e))?;
+                            alt_out.flush().map_err(|e| ClientError::Write(e))?;
+
                             write!(
-                                stdout, "{}", "press any key to return to menu "
+                                alt_out, "{}", "press any key to return to menu "
                             ).map_err(|e| ClientError::Write(e))?;
-                            stdout.flush().map_err(|e| ClientError::Write(e))?;
+
+                            alt_out.flush().map_err(|e| ClientError::Write(e))?;
                             break;
                         }
                         _ => return Err(ClientError::IllegalResponse),
                     }
                 }
-                Ok(Interface::ReturnHome)
+                Ok(Interface::ReturnHome { row: 6, alt_screen: Some(alt_out) })
             }
-            s => return Err(ClientError::InterfaceState(s)),
+            s => return Err(ClientError::InterfaceState),
         }
     }
 
     /// Transitions the state of the interface based on the input of the client
-    #[instrument(ret, err, skip_all)]
     pub async fn parse_request<W: AsyncWriteExt + Unpin, C: Read>(self, mut to_server: W, mut from_client: C) -> Result<Self, ClientError> {
         let mut stdout = stdout().into_raw_mode().expect("unable to convert terminal into raw mode");
         match self {
             Interface::Home => {
-                debug!(interface = ?self, "interface is in `Home` state");
+                debug!("interface is in `Home` state");
                 let next_state = loop {
                     // let mut buf = String::default();
                     // let _ = from_client.read_to_string(&mut buf)
@@ -304,12 +322,16 @@ impl Interface {
                 };
                 Ok(next_state)
             }
-            Interface::ReturnHome => {
-                debug!(interface = ?self, "interface is in `ReturnHome` state");
-                let _ = utils::read_client_input(&mut stdout, 6, 1)?;
+            Interface::ReturnHome { row, alt_screen } => {
+                debug!("interface is in `ReturnHome` state");
+                let _ = if let Some(mut alt_out) = alt_screen {
+                    utils::read_client_input(&mut alt_out, row, 1)
+                } else {
+                    utils::read_client_input(&mut stdout, row, 1)
+                };
                 Ok(Interface::Home)
             }
-            s => Err(ClientError::InterfaceState(s))
+            s => Err(ClientError::InterfaceState)
         }
     }
 }
@@ -349,7 +371,7 @@ mod utils {
         Ok(())
     }
 
-    pub fn read_client_input(out: &mut RawTerminal<Stdout>, row: u16, col: u16) -> Result<String, ClientError> {
+    pub fn read_client_input<W: Write>(out: &mut W, row: u16, col: u16) -> Result<String, ClientError> {
         let mut keys = stdin().keys();
         let mut buf = String::default();
 

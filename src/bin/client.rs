@@ -18,7 +18,7 @@ pub enum ClientError {
     Read(io::Error),
     SendRequest(tokio_io::Error),
     IllegalResponse,
-    InterfaceState(Interface),
+    InterfaceState,
     Connection(io::Error),
 }
 
@@ -30,7 +30,7 @@ impl fmt::Display for ClientError {
             ClientError::Read(e) => write!(f, "{e}"),
             ClientError::SendRequest(e) => write!(f, "{e}"),
             ClientError::IllegalResponse => write!(f, "illegal response received from server"),
-            ClientError::InterfaceState(i) => write!(f, "interface entered illegal state: {i:?}"),
+            ClientError::InterfaceState => write!(f, "interface entered illegal state"),
             ClientError::Connection(e) => write!(f, "{e}"),
         }
     }
