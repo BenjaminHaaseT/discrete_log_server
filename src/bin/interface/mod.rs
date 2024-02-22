@@ -304,6 +304,9 @@ impl Interface {
                     match buf.to_lowercase().as_str() {
                         "q" => {
                             info!("client exiting");
+                            write!(stdout, "{}{}{}{}", cursor::Goto(1, 1), clear::BeforeCursor, clear::AfterCursor, cursor::Show)
+                                .map_err(|e| ClientError::Write(e))?;
+                            stdout.flush().map_err(|e| ClientError::Write(e))?;
                             break Interface::Quit;
                         }
                         p if !p.starts_with('-') && u64::from_str(p).is_ok() => {
