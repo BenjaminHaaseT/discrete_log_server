@@ -3,7 +3,7 @@ use std::time::Duration;
 use std::str::FromStr;
 use tokio::io::{AsyncWrite, AsyncWriteExt, AsyncRead, AsyncReadExt};
 use tracing::{error, info, debug, instrument};
-pub use termion::{raw::{IntoRawMode, RawTerminal}, color, screen::{AlternateScreen, IntoAlternateScreen}, style, cursor, input::TermRead, event::Key, clear};
+pub use termion::{raw::{IntoRawMode, RawTerminal}, color, screen::{AlternateScreen, IntoAlternateScreen}, terminal_size, scroll, style, cursor, input::TermRead, event::Key, clear};
 
 use discrete_log_server::{Response, BytesDeser, BytesSer, AsBytes, Frame};
 use super::ClientError;
@@ -120,7 +120,7 @@ impl Interface {
                 // display table headings
                 write!(
                     alt_out, "{:<11}|{:^11}|{:^11}|{:^11}|{:^11}|{:^11}|{:^11}|\n",
-                    "i", "x", "alpha", "beta", "y", "gamma", "delta"
+                    "i", "x", "alpha", "beta", "y", "gamma", "delta",
                 ).map_err(|e| ClientError::Write(e))?;
                 alt_out.flush().map_err(|e| ClientError::Write(e))?;
 
@@ -159,7 +159,7 @@ impl Interface {
                         Response::SuccessfulLog { log, g, h, p, ratio } => {
                             write!(
                                 alt_out, "{}{}{}{}\n",
-                                cursor::Goto(1, row), style::Bold, "-".repeat(84), style::Reset,
+                                cursor::Goto(1, row), style::Bold, "-".repeat(85), style::Reset,
                                 // cursor::Goto(1, row + 1),
                                 // format!("discrete log solved: {g}^{log} = {h} in the field F{p}, ratio of iterations to sqrt({p}) = {ratio:.10}")
                             ).map_err(|e| ClientError::Write(e))?;
@@ -213,10 +213,14 @@ impl Interface {
                     alt_out, "{:<14}|{:^14}|{:^14}|{:^14}|\n",
                     "i", "x", "y", "g",
                 ).map_err(|e| ClientError::Write(e))?;
+                alt_out.flush().map_err(|e| ClientError::Write(e))?;
+
                 write!(
-                    alt_out, "{}\n", "-".repeat(60)
+                    alt_out, "{}{}\n", cursor::Goto(1, 2), "-".repeat(60)
                 ).map_err(|e| ClientError::Write(e))?;
                 alt_out.flush().map_err(|e| ClientError::Write(e))?;
+
+                let mut row = 3;
 
                 loop {
                     match Response::from_reader(&mut from_server)
@@ -225,21 +229,28 @@ impl Interface {
                     {
                         Response::RSAItem { item } => {
                             write!(
-                                alt_out, "{:<14}|{:^14}|{:^14}|{:^14}|\n",
-                                item.i, item.xi, item.yi, item.g
+                                alt_out, "{}{:<14}|{:^14}|{:^14}|{:^14}|\n",
+                                cursor::Goto(1, row), item.i, item.xi, item.yi, item.g
                             ).map_err(|e| ClientError::Write(e))?;
                             alt_out.flush().map_err(|e| ClientError::Write(e))?;
                         }
                         Response::SuccessfulRSA { p, q, ratio } => {
                             write!(
-                                alt_out, "{}{}{}\n{}\n",
-                                style::Bold, "-".repeat(60), style::Reset,
+                                alt_out, "{}{}{}{}\n",
+                                cursor::Goto(1, row), style::Bold, "-".repeat(60), style::Reset,
+
+                            ).map_err(|e| ClientError::Write(e))?;
+                            alt_out.flush().map_err(|e| ClientError::Write(e))?;
+
+                            write!(
+                                alt_out, "{}{}{}\n", cursor::Goto(1, row + 1),
+                                color::Fg(color::Rgb(225, 247, 244)),
                                 format!("public key factored successfully: n = {} * {}, ratio of iterations to sqrt({}) {:.10}", p, q,  p * q, ratio)
                             ).map_err(|e| ClientError::Write(e))?;
                             alt_out.flush().map_err(|e| ClientError::Write(e))?;
 
                             write!(
-                                alt_out, "{}", "press any key to return to menu "
+                                alt_out, "{}{}", cursor::Goto(1, row + 2), "press any key to return to menu "
                             ).map_err(|e| ClientError::Write(e))?;
 
                             alt_out.flush().map_err(|e| ClientError::Write(e))?;
@@ -247,14 +258,21 @@ impl Interface {
                         }
                         Response::UnsuccessfulRSA { n} => {
                             write!(
-                                alt_out, "{}{}{}\n{}\n",
-                                style::Bold, "-".repeat(60), style::Reset,
-                                format!("public key {n} not able to be factored")
+                                alt_out, "{}{}{}{}\n",
+                                cursor::Goto(1, row), style::Bold, "-".repeat(60), style::Reset,
+
                             ).map_err(|e| ClientError::Write(e))?;
                             alt_out.flush().map_err(|e| ClientError::Write(e))?;
 
                             write!(
-                                alt_out, "{}", "press any key to return to menu "
+                                alt_out, "{}{}{}\n", cursor::Goto(1, row + 1),
+                                color::Fg(color::Rgb(225, 247, 244)),
+                                format!("public key: {n} was not factored successfully"),
+                            ).map_err(|e| ClientError::Write(e))?;
+                            alt_out.flush().map_err(|e| ClientError::Write(e))?;
+
+                            write!(
+                                alt_out, "{}{}", cursor::Goto(1, row + 2), "press any key to return to menu "
                             ).map_err(|e| ClientError::Write(e))?;
 
                             alt_out.flush().map_err(|e| ClientError::Write(e))?;
@@ -262,6 +280,8 @@ impl Interface {
                         }
                         _ => return Err(ClientError::IllegalResponse),
                     }
+
+                    row += 1;
                 }
                 Ok(Interface::ReturnHome { row: 6, alt_screen: Some(alt_out) })
             }
